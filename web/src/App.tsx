@@ -229,13 +229,8 @@ function App() {
     }
   }
 
-  async function openAnimeOrResume(anime: Anime) {
-    const history = findHistoryForAnime(anime, continueWatching);
-    if (history) {
-      await resumeHistoryItem(history);
-      return;
-    }
-    await openAnime(anime);
+  async function openHistoryItem(item: WatchHistory) {
+    await openAnime(historyToAnime(item, myList));
   }
 
   async function toggleMyList(anime: Anime) {
@@ -299,29 +294,6 @@ function App() {
     }
   }
 
-  async function resumeHistoryItem(item: WatchHistory) {
-    const anime = historyToAnime(item, myList);
-    setSelectedAnime(anime);
-    setEpisodes([]);
-    setLoadingEpisodes(true);
-    setError(null);
-    void enrichAnime(anime);
-    try {
-      const episodeList = await api.getEpisodes(anime.provider, anime.id);
-      setEpisodes(episodeList);
-      const episode =
-        episodeList.find((candidate) => candidate.number === item.episodeNumber) ??
-        episodeList[0];
-      if (episode) {
-        await playEpisode(anime, episode, item.positionSeconds, episodeList);
-      }
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoadingEpisodes(false);
-    }
-  }
-
   const savedAnime = useMemo(() => myList.map(favoriteToAnime), [myList]);
   const latestHistory = continueWatching[0] ?? null;
   const featuredAnime = latestHistory ? historyToAnime(latestHistory, myList) : savedAnime[0] ?? null;
@@ -365,8 +337,8 @@ function App() {
                 savedAnime={savedAnime.slice(0, 10)}
                 savedTotal={savedAnime.length}
                 onSourceSelect={selectSource}
-                onResumeHistory={(item) => void resumeHistoryItem(item)}
-                onOpenAnime={(anime) => void openAnimeOrResume(anime)}
+                onResumeHistory={(item) => void openHistoryItem(item)}
+                onOpenAnime={(anime) => void openAnime(anime)}
                 onShowHistory={continueWatching.length ? () => navigate("continue") : undefined}
                 onShowMyList={() => navigate("my-list")}
                 myList={myList}
@@ -380,7 +352,7 @@ function App() {
             <HistoryPage
               key="continue"
               items={continueWatching}
-              onOpen={(item) => void resumeHistoryItem(item)}
+              onOpen={(item) => void openHistoryItem(item)}
               onRemove={(item) => void removeHistoryItem(item)}
               onBack={goBack}
               myList={myList}
@@ -392,7 +364,7 @@ function App() {
             <MyListPage
               key="my-list"
               items={savedAnime}
-              onOpen={(anime) => void openAnimeOrResume(anime)}
+              onOpen={(anime) => void openAnime(anime)}
               onRemove={(anime) => void removeFromMyList(anime)}
               onBack={goBack}
             />
@@ -411,7 +383,7 @@ function App() {
               onSearch={() => void search()}
               onSourceSelect={selectSource}
               onSelectAnime={setSearchSelection}
-              onOpenAnime={(anime) => void openAnimeOrResume(anime)}
+              onOpenAnime={(anime) => void openAnime(anime)}
               onToggleMyList={(anime) => void toggleMyList(anime)}
               onBack={goBack}
             />
@@ -750,6 +722,7 @@ function SearchStage({
       exit={{ opacity: 0, scale: 0.99, y: -14 }}
       transition={{ duration: 0.26, ease: "easeOut" }}
     >
+      <img className="search-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
       <div className="search-command-panel">
         <div className="search-header">
           <IconButton label="Back" onClick={onBack}>
@@ -1092,7 +1065,7 @@ function HistoryCard({
         <div className="poster-image-wrapper">
           <img src={item.coverUrl || LOGO_SRC} alt="" loading="lazy" />
           <div className="play-overlay">
-            <Play size={28} fill="currentColor" />
+            <Film size={28} />
           </div>
           <div className="progress watch-progress"><i style={{ width: `${progress}%` }} /></div>
         </div>
@@ -1183,9 +1156,21 @@ function DetailPage({
   }, [activeRangeEpisodes, episodeQuery, latestFirst]);
 
   useEffect(() => {
-    setRangeIndex(0);
-    setHighlightEpisodeNumber(null);
-  }, [episodes.length]);
+    if (!baseRanges.length) {
+      setRangeIndex(0);
+      setHighlightEpisodeNumber(null);
+      return;
+    }
+
+    const resumeNumber = resumeHistory?.episodeNumber;
+    const resumeRangeIndex = resumeNumber
+      ? baseRanges.findIndex((range) => range.some((episode) => episode.number === resumeNumber))
+      : -1;
+
+    setEpisodeQuery("");
+    setRangeIndex(resumeRangeIndex >= 0 ? resumeRangeIndex : 0);
+    setHighlightEpisodeNumber(resumeNumber ?? null);
+  }, [anime.provider, anime.id, baseRanges.length, resumeHistory?.episodeNumber]);
 
   useEffect(() => {
     setRangeIndex((current) => Math.min(current, Math.max(0, baseRanges.length - 1)));
@@ -1204,7 +1189,7 @@ function DetailPage({
 
   const firstEpisode = sortedEpisodes[0];
   const latestEpisode = sortedEpisodes[sortedEpisodes.length - 1];
-  const jumpTarget = episodes.find((episode) => episode.number === Number(jumpEpisode));
+  const jumpTarget = sortedEpisodes.find((episode) => episode.number === Number(jumpEpisode));
   const resumeEpisode = resumeHistory
     ? episodes.find((episode) => episode.number === resumeHistory.episodeNumber)
     : undefined;
@@ -1212,16 +1197,20 @@ function DetailPage({
     ? `${activeRangeEpisodes[0].number}-${activeRangeEpisodes[activeRangeEpisodes.length - 1].number}`
     : "0";
 
-  function playJumpTarget() {
-    if (!jumpTarget) return;
+  function focusEpisode(episode: Episode) {
     const nextRange = baseRanges.findIndex((range) =>
-      range.some((episode) => episode.number === jumpTarget.number),
+      range.some((candidate) => candidate.number === episode.number),
     );
     if (nextRange >= 0) {
       setEpisodeQuery("");
       setRangeIndex(nextRange);
-      setHighlightEpisodeNumber(jumpTarget.number);
+      setHighlightEpisodeNumber(episode.number);
     }
+  }
+
+  function playJumpTarget() {
+    if (!jumpTarget) return;
+    focusEpisode(jumpTarget);
   }
 
   return (
@@ -1273,7 +1262,15 @@ function DetailPage({
               <h3>Episodes</h3>
               <span>Range {activeRangeLabel} / {episodes.length} total</span>
             </div>
-            <strong>{visibleEpisodes.length} shown</strong>
+            <div className="episode-heading-actions">
+              {resumeEpisode && (
+                <button className="episode-resume-jump" onClick={() => focusEpisode(resumeEpisode)}>
+                  <Clock size={15} />
+                  E{resumeEpisode.number} at {formatTime(resumeHistory?.positionSeconds ?? 0)}
+                </button>
+              )}
+              <strong>{visibleEpisodes.length} shown</strong>
+            </div>
           </div>
           <div className="episode-toolbar">
             <label>
@@ -1306,17 +1303,20 @@ function DetailPage({
               {baseRanges.map((range, index) => {
                 const first = range[0]?.number;
                 const last = range[range.length - 1]?.number;
+                const rangeHasResume = resumeEpisode
+                  ? range.some((episode) => episode.number === resumeEpisode.number)
+                  : false;
                 return (
                   <button
                     key={`${first}-${last}`}
-                    className={safeRangeIndex === index ? "episode-range-button active" : "episode-range-button"}
+                    className={`episode-range-button${safeRangeIndex === index ? " active" : ""}${rangeHasResume ? " resume-range" : ""}`}
                     onClick={() => {
                       setRangeIndex(index);
                       setHighlightEpisodeNumber(null);
                     }}
                   >
                     <span>{first}-{last}</span>
-                    <small>{range.length}</small>
+                    <small>{rangeHasResume ? "Resume" : range.length}</small>
                   </button>
                 );
               })}

@@ -2,9 +2,9 @@ name: Brew Test Bot
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
-    branches: [master]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
         run: brew test-bot --only-tap-syntax
 
       - name: Audit cask
-        run: brew audit --cask --strict --online ./Casks/ani-desk.rb
+        run: brew audit --cask --strict --online silent9669/ani-desk/ani-desk
 
       - name: Install cask smoke
-        run: brew install --cask --no-quarantine ./Casks/ani-desk.rb
+        run: brew install --cask silent9669/ani-desk/ani-desk

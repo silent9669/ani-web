@@ -65,6 +65,7 @@ def test_t1_dashboard_my_list_nav(mocked_page):
 def test_t1_search_navigation(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
     expect(mocked_page.locator(".search-stage")).to_be_visible()
+    expect(mocked_page.locator(".search-stage-watermark")).to_be_visible()
     expect(mocked_page.locator(".search-input-shell input")).to_be_visible()
 
 def test_t1_search_input(mocked_page):
@@ -75,9 +76,17 @@ def test_t1_search_input(mocked_page):
 
 def test_t1_search_provider_chips(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
-    chips = mocked_page.locator(".provider-chip")
+    expect(mocked_page.locator(".search-stage .search-command-panel")).to_be_visible()
+    chips = mocked_page.locator(".search-stage .provider-chip")
     expect(chips.first).to_be_visible()
     expect(chips).to_have_count(3)
+    spacing_ok = mocked_page.evaluate("""() => {
+        const input = document.querySelector('.search-stage .search-input-shell');
+        const source = document.querySelector('.search-stage .search-source-row');
+        if (!input || !source) return false;
+        return source.getBoundingClientRect().top - input.getBoundingClientRect().bottom >= 8;
+    }""")
+    assert spacing_ok is True
 
 def test_t1_search_results_pane(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
@@ -572,12 +581,16 @@ def test_t3_search_provider_switch_reloads(mocked_page):
     # Check that search results pane title updated
     expect(mocked_page.locator(".search-results-pane .pane-title span")).to_have_text("KKPhim")
 
-def test_t3_continue_watching_resume(mocked_page):
+def test_t3_continue_watching_opens_saved_episode_detail(mocked_page):
     # Click continue watching card for One Piece
     card = mocked_page.locator(".content-row:has-text('Continue Watching') .poster-card").first
     card.click()
-    # Verify playback opens directly at the stored progress.
-    expect(mocked_page.locator("video")).to_be_visible()
+    # Verify the episode chooser opens at the stored episode instead of playing immediately.
+    expect(mocked_page.locator(".detail-page")).to_be_visible()
+    expect(mocked_page.locator("video")).to_have_count(0)
+    expect(mocked_page.locator(".episode-resume-jump")).to_contain_text("E5")
+    expect(mocked_page.locator(".episode-range-button.resume-range")).to_contain_text("1-50")
+    expect(mocked_page.locator(".episode-list-row.highlighted")).to_contain_text("Episode 5")
 
 def test_t3_detail_pagination_sorting(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()

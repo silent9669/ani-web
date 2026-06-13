@@ -156,6 +156,8 @@ jobs:
           tag_name: ${{ needs.validate.outputs.tag }}
           target_commitish: master
           files: release-artifacts/*
+          overwrite_files: true
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           body: |

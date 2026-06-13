@@ -37,11 +37,10 @@ impl AsciiRenderer {
     }
 
     pub fn is_available() -> bool {
-        // image_ascii is always available since it's a Rust crate
         true
     }
 
-    pub fn render(&self, image_data: &[u8], _width: u32, _height: u32) -> Result<String> {
+    pub fn render(&self, image_data: &[u8], width: u32, height: u32) -> Result<String> {
         // Validate image data
         if image_data.is_empty() {
             anyhow::bail!("Image data is empty");
@@ -62,15 +61,42 @@ impl AsciiRenderer {
             anyhow::bail!("Invalid image format");
         }
 
-        // Use image_ascii for in-memory image rendering
-        // First, parse the image data using the image crate
-        let img = image::load_from_memory(image_data).context("Failed to parse image data")?;
+        let img = image::load_from_memory(image_data)
+            .context("Failed to parse image data")?
+            .to_luma8();
+        let (source_width, source_height) = img.dimensions();
+        if source_width == 0 || source_height == 0 {
+            anyhow::bail!("Image has no pixels");
+        }
 
-        // Create ASCII text generator
-        let generator = image_ascii::TextGenerator::new(&img);
+        let target_width = width.clamp(1, source_width).min(160);
+        let inferred_height = ((target_width as f32 * source_height as f32 / source_width as f32)
+            * 0.48)
+            .round()
+            .max(1.0) as u32;
+        let target_height = if height == 0 {
+            inferred_height
+        } else {
+            height.clamp(1, source_height).min(80)
+        };
+        let ramp = b"@%#*+=-:. ";
+        let mut ascii = String::with_capacity(((target_width + 1) * target_height) as usize);
 
-        // Generate ASCII art
-        let ascii = generator.generate();
+        for y in 0..target_height {
+            for x in 0..target_width {
+                let source_x = x * source_width / target_width;
+                let source_y = y * source_height / target_height;
+                let luminance = img.get_pixel(
+                    source_x.min(source_width - 1),
+                    source_y.min(source_height - 1),
+                )[0] as usize;
+                let index = luminance * (ramp.len() - 1) / 255;
+                ascii.push(ramp[index] as char);
+            }
+            if y + 1 < target_height {
+                ascii.push('\n');
+            }
+        }
 
         Ok(ascii)
     }
