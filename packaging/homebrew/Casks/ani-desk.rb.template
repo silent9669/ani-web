@@ -2,7 +2,7 @@ cask "ani-desk" do
   arch arm: "aarch64", intel: "x64"
 
   version "<%= version_without_v %>"
-  sha256 arm: "<%= macos_arm_sha256 %>",
+  sha256 arm:   "<%= macos_arm_sha256 %>",
          intel: "<%= macos_intel_sha256 %>"
 
   url "https://github.com/silent9669/ani-desk/releases/download/v#{version}/ani-desk_#{version}_#{arch}.dmg"
@@ -14,6 +14,8 @@ cask "ani-desk" do
     url "https://github.com/silent9669/ani-desk/releases/latest"
     strategy :github_latest
   end
+
+  depends_on :macos
 
   app "ani-desk.app"
 
