@@ -307,6 +307,8 @@ main {
 }
 
 .home-dashboard {
+  position: relative;
+  isolation: isolate;
   height: 100%;
   min-height: 0;
   display: grid;
@@ -884,13 +886,13 @@ main {
   position: absolute;
   z-index: 0;
   top: 50%;
-  left: 58%;
-  width: min(48vw, 680px);
-  max-height: 72vh;
+  left: 50%;
+  width: min(65vw, 820px);
+  max-height: 80vh;
   object-fit: contain;
-  opacity: 0.055;
+  opacity: 0.035;
   filter: grayscale(1) brightness(0.35) contrast(1.2);
-  transform: translate(-50%, -44%);
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
@@ -954,6 +956,19 @@ main {
 
 .empty-state {
   color: var(--muted);
+}
+
+.grid-page .empty-state {
+  display: block;
+  width: 100%;
+  margin: 2rem 0;
+  padding: 3rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  text-align: center;
+  box-sizing: border-box;
 }
 
 .empty-panel {
@@ -1024,7 +1039,7 @@ main {
   align-items: center;
   gap: 0.78rem;
   min-width: 0;
-  margin-top: 0.24rem;
+  margin-top: 1.25rem;
   padding-top: 0.18rem;
   padding-left: 3.3rem;
 }
@@ -1545,6 +1560,8 @@ main {
   color: var(--amber);
   font-size: 0.78rem;
   font-weight: 820;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .episode-play-icon {
@@ -1782,7 +1799,7 @@ main {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.68rem;
-    margin-top: 0.2rem;
+    margin-top: 1rem;
     padding-left: 0;
   }
 

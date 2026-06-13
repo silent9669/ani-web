@@ -12,6 +12,26 @@ ani-desk is a Tauri desktop app for searching, saving, and watching anime from m
 - Custom playback overlay with keyboard seeking, quality controls, subtitles, and mpv fallback
 - Local migration from existing ani-tui config/database paths when ani-desk data is not present
 
+## Demo
+
+Check out the user interface and key features of `ani-desk` below:
+
+### 1. Dashboard / Home Screen
+![Dashboard](Screenshot%202026-06-13%20at%2023.01.49.png)
+*The Home screen features a clean dashboard centered around a compact logo and a search command bar. It includes source provider tabs, a "Continue Watching" progress shelf, and a framed card layout showcasing the empty state of "My List".*
+
+### 2. Continue Watching Shelf / History Grid
+![Continue Watching Grid](Screenshot%202026-06-13%20at%2023.02.05.png)
+*The full "Continue Watching" view offers an organized grid layout of all in-progress titles, allowing users to filter and sort titles by recency to quickly resume where they left off.*
+
+### 3. Dual-Pane Search
+![Dual-Pane Search](Screenshot%202026-06-13%20at%2023.02.17.png)
+*The responsive search interface splits into a list of results on the left pane and a rich detail preview on the right pane. The preview includes high-resolution poster artwork, metadata tags, a full synopsis, and options to play or add the title to "My List".*
+
+### 4. Custom Playback & mpv Fallback
+![Custom Playback UI](Screenshot%202026-06-13%20at%2023.03.05.png)
+*The native player overlay supports full-featured HLS/MP4 playback. It includes customized seek and volume controls, provider quality adjustments, subtitles, and a dedicated integration to open the stream externally in the high-performance `mpv` player.*
+
 ## Tech Stack
 
 - Rust core: providers, SQLite storage, config migration, and mpv fallback
@@ -85,7 +105,18 @@ npm run tauri -- build --debug --no-bundle
 
 ## Install
 
-macOS installs as a real `.app` through Homebrew Cask:
+You can download and install `ani-desk` using one of the following methods:
+
+### 1. Direct Download (GitHub Releases)
+You can download the pre-built, platform-specific binaries directly from the [GitHub Releases page](https://github.com/silent9669/ani-desk/releases):
+- **macOS**: `ani-desk_1.0.0_aarch64.dmg` (Apple Silicon) or `ani-desk_1.0.0_x64.dmg` (Intel)
+- **Windows**: `ani-desk_1.0.0_x64-setup.exe` or `ani-desk_1.0.0_x64.msi`
+- **Linux**: `ani-desk_1.0.0_amd64.AppImage`, `ani-desk_1.0.0_amd64.deb`, or `ani-desk_1.0.0_x86_64.rpm`
+
+*Note: Artifacts are unsigned for v1.0. macOS Gatekeeper and Windows SmartScreen may ask you to approve the first launch.*
+
+### 2. Via Homebrew (macOS)
+Install `ani-desk` as a native `.app` through Homebrew Cask:
 
 ```bash
 brew install --cask silent9669/ani-desk/ani-desk
@@ -104,27 +135,11 @@ For local release validation, keep the tap checkout at:
 /Users/phucdang/Documents/homebrew-ani-desk
 ```
 
-Direct platform helpers are available under:
-
-```bash
-packaging/macos/install.sh
-packaging/linux/install.sh
-packaging/windows/install.ps1
-```
-
-Release builds publish these unsigned desktop app artifacts:
-
-```bash
-ani-desk_1.0.0_aarch64.dmg
-ani-desk_1.0.0_x64.dmg
-ani-desk_1.0.0_x64-setup.exe
-ani-desk_1.0.0_x64.msi
-ani-desk_1.0.0_amd64.AppImage
-ani-desk_1.0.0_amd64.deb
-ani-desk_1.0.0_x86_64.rpm
-```
-
-Artifacts are unsigned for v1.0. macOS Gatekeeper and Windows SmartScreen may ask you to approve the first launch.
+### 3. Direct Platform Install Helpers
+Scripts are also available to assist with quick installation:
+- **macOS**: `packaging/macos/install.sh`
+- **Linux**: `packaging/linux/install.sh`
+- **Windows (PowerShell)**: `packaging/windows/install.ps1`
 
 ## Data Migration
 

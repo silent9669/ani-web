@@ -480,6 +480,7 @@ function HomeDashboard({
 }) {
   return (
     <section className="home-dashboard">
+      <img className="search-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
       <motion.div
         className="home-command-center"
         initial="hidden"
@@ -510,29 +511,31 @@ function HomeDashboard({
         </motion.div>
       </motion.div>
 
-      <div className="dashboard-shelves">
-        <ContinueWatchingRow
-          items={continueItems}
-          total={continueTotal}
-          onOpen={onResumeHistory}
-          onShowMore={onShowHistory}
-          myList={myList}
-          onToggleFavorite={(item) => onToggleFavorite(historyToAnime(item, myList))}
-          onRemove={onRemoveHistory}
-        />
-        <AnimeRow
-          title="My List"
-          items={savedAnime}
-          total={savedTotal}
-          onOpen={onOpenAnime}
-          onShowMore={onShowMyList}
-          myList={myList}
-          onToggleFavorite={onToggleFavorite}
-          onRemove={onToggleFavorite}
-          emptyTitle="Your list is empty"
-          emptySubtitle="Search and add titles to keep them here."
-        />
-      </div>
+      {continueItems.length === 0 && savedAnime.length === 0 ? null : (
+        <div className="dashboard-shelves">
+          <ContinueWatchingRow
+            items={continueItems}
+            total={continueTotal}
+            onOpen={onResumeHistory}
+            onShowMore={onShowHistory}
+            myList={myList}
+            onToggleFavorite={(item) => onToggleFavorite(historyToAnime(item, myList))}
+            onRemove={onRemoveHistory}
+          />
+          <AnimeRow
+            title="My List"
+            items={savedAnime}
+            total={savedTotal}
+            onOpen={onOpenAnime}
+            onShowMore={onShowMyList}
+            myList={myList}
+            onToggleFavorite={onToggleFavorite}
+            onRemove={onToggleFavorite}
+            emptyTitle="Your list is empty"
+            emptySubtitle="Search and add titles to keep them here."
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -655,7 +658,6 @@ function AnimeRow({
 function ShelfEmptyCard({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="shelf-empty-card">
-      <img src={LOGO_SRC} alt="" />
       <div>
         <strong>{title}</strong>
         <span>{subtitle}</span>
@@ -748,86 +750,88 @@ function SearchStage({
         </div>
       </div>
 
-      <div className="search-layout">
-        <aside className="search-results-pane">
-          <div className="pane-title">
-            <span>{selectedSource?.name ?? "Source"}</span>
-            <strong>{results.length}</strong>
-          </div>
-          {loading && !results.length ? (
-            Array.from({ length: 9 }).map((_, index) => <div className="result-skeleton" key={index} />)
-          ) : results.length ? (
-            results.map((anime, index) => {
-              const active = selectedAnime && animeKey(anime.provider, anime.id) === animeKey(selectedAnime.provider, selectedAnime.id);
-              return (
-                <motion.button
-                  className={active ? "search-result active" : "search-result"}
-                  key={`${anime.provider}:${anime.id}`}
-                  onClick={() => onSelectAnime(anime)}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 380,
-                    damping: 30,
-                    delay: Math.min(index * 0.012, 0.12)
-                  }}
-                  whileHover={{ x: 2, y: -1 }}
-                >
-                  <img src={anime.coverUrl || LOGO_SRC} alt="" />
-                  <span>{anime.title}</span>
-                  <small>{anime.provider} / {anime.language}</small>
-                </motion.button>
-              );
-            })
-          ) : (
-            <EmptyPanel title={query.trim().length < 2 ? "ani-desk" : "No results"} compact />
-          )}
-        </aside>
-
-        <AnimatePresence mode="wait">
-          <motion.div
-            className="search-preview"
-            key={selectedAnime ? animeKey(selectedAnime.provider, selectedAnime.id) : "empty"}
-            initial={{ opacity: 0, scale: 0.985, x: 18 }}
-            animate={{ opacity: 1, scale: 1, x: 0 }}
-            exit={{ opacity: 0, scale: 0.99, x: -18 }}
-            transition={{ duration: 0.22, ease: "easeOut" }}
-          >
-            {selectedAnime ? (
-              <>
-                <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
-                <img className="preview-poster-fallback" src={selectedAnime.coverUrl || LOGO_SRC} alt="" />
-                <div className="preview-copy">
-                  <p className="eyebrow">{selectedAnime.provider} / {selectedAnime.language}</p>
-                  <h1>{selectedAnime.title}</h1>
-                  <p>{selectedAnime.synopsis || "Description is loaded from the selected provider when available."}</p>
-                  <div className="preview-meta">
-                    <span><Film size={16} /> {selectedAnime.totalEpisodes ? `${selectedAnime.totalEpisodes} episodes` : "Episodes available"}</span>
-                    <span><SlidersHorizontal size={16} /> {selectedSource?.name ?? selectedAnime.provider}</span>
-                  </div>
-                  <div className="detail-actions">
-                    <button className="primary" onClick={() => onOpenAnime(selectedAnime)}>
-                      <Play size={18} />
-                      Open
-                    </button>
-                    <button onClick={() => onToggleMyList(selectedAnime)}>
-                      {selectedAnime.isFavorite ? (
-                        <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
-                      ) : (
-                        <Star size={18} style={{ color: "var(--red)" }} />
-                      )}
-                      {selectedAnime.isFavorite ? "In My List" : "My List"}
-                    </button>
-                  </div>
-                </div>
-              </>
+      {query.trim().length >= 2 && (
+        <div className="search-layout">
+          <aside className="search-results-pane">
+            <div className="pane-title">
+              <span>{selectedSource?.name ?? "Source"}</span>
+              <strong>{results.length}</strong>
+            </div>
+            {loading && !results.length ? (
+              Array.from({ length: 9 }).map((_, index) => <div className="result-skeleton" key={index} />)
+            ) : results.length ? (
+              results.map((anime, index) => {
+                const active = selectedAnime && animeKey(anime.provider, anime.id) === animeKey(selectedAnime.provider, selectedAnime.id);
+                return (
+                  <motion.button
+                    className={active ? "search-result active" : "search-result"}
+                    key={`${anime.provider}:${anime.id}`}
+                    onClick={() => onSelectAnime(anime)}
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 380,
+                      damping: 30,
+                      delay: Math.min(index * 0.012, 0.12)
+                    }}
+                    whileHover={{ x: 2, y: -1 }}
+                  >
+                    <img src={anime.coverUrl || LOGO_SRC} alt="" />
+                    <span>{anime.title}</span>
+                    <small>{anime.provider} / {anime.language}</small>
+                  </motion.button>
+                );
+              })
             ) : (
-              <EmptyPanel title="ani-desk" />
+              <EmptyPanel title={query.trim().length < 2 ? "ani-desk" : "No results"} compact />
             )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+          </aside>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              className="search-preview"
+              key={selectedAnime ? animeKey(selectedAnime.provider, selectedAnime.id) : "empty"}
+              initial={{ opacity: 0, scale: 0.985, x: 18 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.99, x: -18 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              {selectedAnime ? (
+                <>
+                  <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
+                  <img className="preview-poster-fallback" src={selectedAnime.coverUrl || LOGO_SRC} alt="" />
+                  <div className="preview-copy">
+                    <p className="eyebrow">{selectedAnime.provider} / {selectedAnime.language}</p>
+                    <h1>{selectedAnime.title}</h1>
+                    <p>{selectedAnime.synopsis || "Description is loaded from the selected provider when available."}</p>
+                    <div className="preview-meta">
+                      <span><Film size={16} /> {selectedAnime.totalEpisodes ? `${selectedAnime.totalEpisodes} episodes` : "Episodes available"}</span>
+                      <span><SlidersHorizontal size={16} /> {selectedSource?.name ?? selectedAnime.provider}</span>
+                    </div>
+                    <div className="detail-actions">
+                      <button className="primary" onClick={() => onOpenAnime(selectedAnime)}>
+                        <Play size={18} />
+                        Open
+                      </button>
+                      <button onClick={() => onToggleMyList(selectedAnime)}>
+                        {selectedAnime.isFavorite ? (
+                          <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
+                        ) : (
+                          <Star size={18} style={{ color: "var(--red)" }} />
+                        )}
+                        {selectedAnime.isFavorite ? "In My List" : "My List"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <EmptyPanel title="ani-desk" />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      )}
     </motion.section>
   );
 }
@@ -1739,7 +1743,6 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
 function EmptyPanel({ title, compact = false }: { title: string; compact?: boolean }) {
   return (
     <div className={compact ? "empty-panel compact" : "empty-panel"}>
-      <img src={LOGO_SRC} alt="" />
       <h2>{title}</h2>
     </div>
   );

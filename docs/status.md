@@ -17,6 +17,14 @@ Remote target: `https://github.com/silent9669/ani-desk`
 
 5. **Release Validation Prep** — The release workflow and Homebrew Cask packaging target `silent9669/homebrew-ani-desk`; the local tap checkout is expected at `/Users/phucdang/Documents/homebrew-ani-desk` when deployment validation begins.
 
+6. **Recent UI/UX Enhancements**:
+   - **Centered Single Watermark Background**: Replaced repeating/tiled backgrounds with a single centered watermark background logo to maintain a professional, minimalist aesthetic.
+   - **Search UI Margin Adjustment**: Adjusted margins across the search layout to ensure a balanced, spacious, and pixel-perfect presentation.
+   - **Framed Empty State for My List**: Nested the empty state message for the My List shelf in a clean, framed card container to match other grid modules and dashboard aesthetics.
+   - **Navigation-First Continue Watching Click**: Clicking on Continue Watching items now navigates users to the respective Anime Detail page rather than immediately launching playback. This allows users to review the episode list, provider sources, and series description.
+   - **Scroll to Last-Watched Episode**: The detail page automatically scrolls to and highlights the last-watched episode in the list, providing a seamless resume experience.
+   - **Truncation Fix**: Applied CSS line-clamping and text-overflow truncation fixes to anime titles, metadata strings, and synopses to prevent layout breakage on long texts.
+
 ### Previous Phase: UI/UX Redesign (R1-R3 Implemented)
 
 The 2026-06-13 UI/UX pass implemented the compact Netflix-style Home/Search/detail experience:
