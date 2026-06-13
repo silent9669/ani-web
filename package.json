@@ -1,0 +1,31 @@
+{
+  "name": "ani-desk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config web/vite.config.ts --host 127.0.0.1 --port 1420",
+    "build": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
+    "preview": "vite preview --config web/vite.config.ts",
+    "icons": "node scripts/prepare-icon-source.mjs && tauri icon src-tauri/icons/icon-source.png",
+    "check:icons": "node scripts/check-generated-icons.mjs",
+    "check:release-version": "node scripts/verify-release-version.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "framer-motion": "^11.0.0",
+    "hls.js": "^1.5.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.0"
+  }
+}

@@ -1,0 +1,38 @@
+name: Brew Test Bot
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  test-cask:
+    name: Test ani-desk cask
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Link checkout as tap
+        run: |
+          TAP_DIR="$(brew --repository)/Library/Taps/silent9669/homebrew-ani-desk"
+          rm -rf "$TAP_DIR"
+          mkdir -p "$(dirname "$TAP_DIR")"
+          ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
+
+      - name: Prepare brew test-bot
+        run: |
+          brew test-bot --only-cleanup-before
+          brew test-bot --only-setup
+
+      - name: Run tap syntax check
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: brew test-bot --only-tap-syntax
+
+      - name: Audit cask
+        run: brew audit --cask --strict --online ./Casks/ani-desk.rb
+
+      - name: Install cask smoke
+        run: brew install --cask --no-quarantine ./Casks/ani-desk.rb

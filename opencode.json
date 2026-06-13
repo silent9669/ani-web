@@ -1,0 +1,124 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "rust-analyzer": {
+      "command": ["rust-analyzer"],
+      "extensions": ["rs"],
+      "initialization": {
+        "cargo": {
+          "features": "all"
+        },
+        "check": {
+          "command": "clippy"
+        }
+      }
+    },
+    "typescript": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "typescript-language-server",
+        "typescript-language-server",
+        "--stdio"
+      ],
+      "extensions": ["ts", "tsx", "js", "jsx", "mjs", "cjs"]
+    },
+    "html": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted",
+        "vscode-html-language-server",
+        "--stdio"
+      ],
+      "extensions": ["html"]
+    },
+    "css": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted",
+        "vscode-css-language-server",
+        "--stdio"
+      ],
+      "extensions": ["css", "scss", "less"]
+    },
+    "json": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted",
+        "vscode-json-language-server",
+        "--stdio"
+      ],
+      "extensions": ["json", "jsonc"]
+    },
+    "tailwindcss": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "@tailwindcss/language-server",
+        "tailwindcss-language-server",
+        "--stdio"
+      ],
+      "extensions": ["html", "css", "ts", "tsx", "js", "jsx"]
+    },
+    "toml": {
+      "command": ["taplo", "lsp", "stdio"],
+      "extensions": ["toml"]
+    },
+    "yaml": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "yaml-language-server",
+        "yaml-language-server",
+        "--stdio"
+      ],
+      "extensions": ["yaml", "yml"]
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "timeout": 30000
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser",
+        "chromium",
+        "--isolated",
+        "--viewport-size",
+        "1440x900"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    },
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "enabled": true,
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "X-MCP-Toolsets": "context,repos,issues,pull_requests,actions,users"
+      },
+      "timeout": 30000
+    }
+  },
+  "experimental": {
+    "mcp_timeout": 30000
+  }
+}

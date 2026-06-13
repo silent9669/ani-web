@@ -1,0 +1,19 @@
+# ani-desk configuration file
+# Place this file at:
+#   macOS: ~/Library/Application Support/com.silent9669.ani-desk/config.toml
+#   Windows: %APPDATA%\com.silent9669.ani-desk\config.toml
+#   Linux: ~/.config/ani-desk/config.toml
+
+[sources]
+# Enable AllAnime source (English)
+allanime = true
+
+# Enable KKPhim source (Vietnamese)
+kkphim = true
+
+# Enable OPhim source (Vietnamese)
+ophim = true
+
+[theme]
+primary_color = "#FF2934"
+secondary_color = "#39C7D5"

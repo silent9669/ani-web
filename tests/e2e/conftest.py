@@ -1,0 +1,242 @@
+import os
+import time
+import socket
+import subprocess
+import pytest
+from playwright.sync_api import sync_playwright
+
+@pytest.fixture(scope="session")
+def vite_server():
+    # Start the Vite server
+    proc = subprocess.Popen(
+        ["npm", "run", "dev"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+    # Wait for the port to be open
+    start_time = time.time()
+    port = 1420
+    host = "127.0.0.1"
+    server_ready = False
+    while time.time() - start_time < 15:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                server_ready = True
+                break
+        except OSError:
+            time.sleep(0.5)
+
+    if not server_ready:
+        proc.kill()
+        raise RuntimeError("Vite dev server failed to start on port 1420")
+
+    yield proc
+
+    proc.terminate()
+    proc.wait()
+
+@pytest.fixture(scope="function")
+def mocked_page(page, vite_server):
+    # Intercept and mock window.__TAURI_INTERNALS__.invoke and window.__tauri_ipc__ before page loads
+    page.add_init_script("""
+        window.__TAURI_INTERNALS__ = window.__TAURI_INTERNALS__ || {};
+        window.__TAURI_CALLS__ = window.__TAURI_CALLS__ || [];
+
+        const getMockState = () => {
+            const defaults = {
+                sources: [
+                    { name: "AllAnime", language: "English" },
+                    { name: "KKPhim", language: "Vietnamese" },
+                    { name: "OPhim", language: "Vietnamese" }
+                ],
+                my_list: [
+                    {
+                        animeId: "AllAnime:naruto",
+                        provider: "AllAnime",
+                        title: "Naruto",
+                        coverUrl: "https://example.com/naruto.jpg"
+                    }
+                ],
+                continue_watching: [
+                    {
+                        animeId: "AllAnime:one-piece",
+                        provider: "AllAnime",
+                        title: "One Piece",
+                        coverUrl: "https://example.com/one-piece.jpg",
+                        episodeNumber: 5,
+                        episodeTitle: "Episode 5",
+                        positionSeconds: 300,
+                        totalSeconds: 1440,
+                        updatedAt: "2026-06-13T10:00:00Z"
+                    }
+                ],
+                search_error: null,
+                playback_error: null,
+                episode_count: 1200
+            };
+            const stored = localStorage.getItem('__TAURI_MOCK_STATE__');
+            if (stored) {
+                try {
+                    return { ...defaults, ...JSON.parse(stored) };
+                } catch(e) {}
+            }
+            return defaults;
+        };
+
+        const saveMockState = (state) => {
+            localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
+        };
+
+        window.__TAURI_MOCK_STATE__ = getMockState();
+
+        window.__TAURI_INTERNALS__.invoke = async function(cmd, args) {
+            console.log("Mocked Invoke called:", cmd, args);
+            window.__TAURI_CALLS__.push({ cmd, args });
+
+            const state = getMockState();
+
+            if (cmd === "list_sources") {
+                return state.sources;
+            } else if (cmd === "get_continue_watching") {
+                return state.continue_watching;
+            } else if (cmd === "get_my_list") {
+                return state.my_list;
+            } else if (cmd === "search_source") {
+                if (state.search_error) {
+                    throw new Error(state.search_error);
+                }
+                const query = args.query || "";
+                if (query.toLowerCase().includes("empty")) {
+                    return [];
+                }
+                const baseResults = [
+                    {
+                        id: "naruto-shippuden",
+                        provider: args.source || "AllAnime",
+                        title: "Naruto Shippuden",
+                        coverUrl: "https://example.com/naruto-shippuden.jpg",
+                        bannerUrl: "https://example.com/naruto-banner.jpg",
+                        language: args.source === "AllAnime" ? "English" : "Vietnamese",
+                        totalEpisodes: 1200,
+                        synopsis: "A story about Naruto.",
+                        isFavorite: false
+                    },
+                    {
+                        id: "demon-slayer",
+                        provider: args.source || "AllAnime",
+                        title: "Demon Slayer",
+                        coverUrl: "https://example.com/demon-slayer.jpg",
+                        bannerUrl: "https://example.com/demon-banner.jpg",
+                        language: args.source === "AllAnime" ? "English" : "Vietnamese",
+                        totalEpisodes: 26,
+                        synopsis: "A story about Tanjiro.",
+                        isFavorite: false
+                    }
+                ];
+                return baseResults.concat(Array.from({ length: 14 }, (_, index) => ({
+                    id: `sample-${index + 1}`,
+                    provider: args.source || "AllAnime",
+                    title: `Sample Anime ${index + 1}`,
+                    coverUrl: `https://example.com/sample-${index + 1}.jpg`,
+                    bannerUrl: `https://example.com/sample-banner-${index + 1}.jpg`,
+                    language: args.source === "AllAnime" ? "English" : "Vietnamese",
+                    totalEpisodes: 12 + index,
+                    synopsis: `Sample synopsis ${index + 1}.`,
+                    isFavorite: false
+                })));
+            } else if (cmd === "get_anime_details") {
+                return {
+                    coverUrl: "https://example.com/details.jpg",
+                    bannerUrl: "https://example.com/banner.jpg",
+                    totalEpisodes: state.episode_count || 1200,
+                    synopsis: "Detailed synopsis of the selected anime."
+                };
+            } else if (cmd === "get_episodes") {
+                const eps = [];
+                const total = state.episode_count || 1200;
+                for (let i = 1; i <= total; i++) {
+                    eps.push({
+                        id: `ep-${i}`,
+                        number: i,
+                        title: `Episode ${i}`,
+                        thumbnail: `https://example.com/ep-${i}.jpg`
+                    });
+                }
+                return eps;
+            } else if (cmd === "prepare_playback") {
+                if (state.playback_error) {
+                    throw new Error(state.playback_error);
+                }
+                return {
+                    sessionId: "session-123",
+                    playbackUrl: "https://example.com/stream.m3u8",
+                    originalUrl: "https://example.com/original",
+                    streamKind: "hls",
+                    subtitles: [],
+                    qualities: ["360p", "720p", "1080p"],
+                    canFallbackToMpv: true
+                };
+            } else if (cmd === "save_progress") {
+                if (args.progress) {
+                    const progress = args.progress;
+                    const idx = state.continue_watching.findIndex(x => x.animeId === progress.animeId);
+                    const item = {
+                        animeId: progress.animeId,
+                        provider: progress.provider,
+                        title: progress.title,
+                        coverUrl: progress.coverUrl,
+                        episodeNumber: progress.episodeNumber,
+                        episodeTitle: progress.episodeTitle || null,
+                        positionSeconds: progress.positionSeconds,
+                        totalSeconds: progress.totalSeconds,
+                        updatedAt: new Date().toISOString()
+                    };
+                    if (idx !== -1) {
+                        state.continue_watching[idx] = item;
+                    } else {
+                        state.continue_watching.push(item);
+                    }
+                    saveMockState(state);
+                }
+                return null;
+            } else if (cmd === "add_to_my_list") {
+                if (args.anime) {
+                    const anime = args.anime;
+                    const key = anime.provider + ":" + anime.id;
+                    if (!state.my_list.some(x => x.animeId === key)) {
+                        state.my_list.push({
+                            animeId: key,
+                            provider: anime.provider,
+                            title: anime.title,
+                            coverUrl: anime.coverUrl
+                        });
+                        saveMockState(state);
+                    }
+                }
+                return null;
+            } else if (cmd === "remove_from_my_list") {
+                const animeId = args.animeId;
+                state.my_list = state.my_list.filter(x => x.animeId !== animeId);
+                saveMockState(state);
+                return null;
+            } else if (cmd === "remove_continue_watching") {
+                const animeId = args.animeId;
+                state.continue_watching = state.continue_watching.filter(x => x.animeId !== animeId);
+                saveMockState(state);
+                return null;
+            }
+            return null;
+        };
+
+        window.__tauri_ipc__ = async function(message) {
+            console.log("Mocked IPC message called:", message);
+            return null;
+        };
+    """)
+    page.goto("http://127.0.0.1:1420")
+    page.evaluate("localStorage.clear()")
+    page.reload()
+    page.wait_for_selector(".app-container, #root")
+    return page

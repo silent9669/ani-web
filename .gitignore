@@ -1,0 +1,48 @@
+# Rust
+target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Frontend
+node_modules/
+dist/
+web/dist/
+src-tauri/gen/
+release-artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application data
+*.db
+*.db-journal
+
+# Config (don't commit personal configs)
+config.toml
+
+# Development/Agent files
+__pycache__/
+.agent/
+.agents/
+.githooks/
+.opencode/
+.ruff_cache/
+.venv/
+.venv-e2e/
+.pytest_cache/
+AGENTS.md
+
+daytona
+daytona.yaml
+# Ignore sensitive and temp directories
+.gemini/
+.obsidian/
+GEMINI.md
+ani-cli-temp/
