@@ -1,11 +1,8 @@
 cask "ani-desk" do
-  arch arm: "aarch64", intel: "x64"
-
   version "1.0.0"
-  sha256 arm:   "PLACEHOLDER_SHA256_ARM64_DMG",
-         intel: "PLACEHOLDER_SHA256_X64_DMG"
+  sha256 "PLACEHOLDER_SHA256_ARM64_DMG"
 
-  url "https://github.com/silent9669/ani-desk/releases/download/v#{version}/ani-desk_#{version}_#{arch}.dmg"
+  url "https://github.com/silent9669/ani-desk/releases/download/v#{version}/ani-desk_#{version}_aarch64.dmg"
   name "ani-desk"
   desc "Netflix-inspired desktop app for anime streaming"
   homepage "https://github.com/silent9669/ani-desk"
@@ -15,7 +12,8 @@ cask "ani-desk" do
     strategy :github_latest
   end
 
-  depends_on :macos
+  depends_on arch: :arm64
+  depends_on macos: ">= :sequoia"
 
   app "ani-desk.app"
 

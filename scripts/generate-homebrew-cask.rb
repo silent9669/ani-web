@@ -15,7 +15,6 @@ version = ARGV[0]
 version_without_v = version.gsub(/^v/, '')
 release_base = "https://github.com/silent9669/ani-desk/releases/download/v#{version_without_v}"
 macos_arm_url = "#{release_base}/ani-desk_#{version_without_v}_aarch64.dmg"
-macos_intel_url = "#{release_base}/ani-desk_#{version_without_v}_x64.dmg"
 
 def sha256_for(url, placeholder)
   filename = File.basename(url)
@@ -40,7 +39,6 @@ rescue OpenURI::HTTPError, SocketError
 end
 
 macos_arm_sha256 = sha256_for(macos_arm_url, 'PLACEHOLDER_SHA256_ARM64_DMG')
-macos_intel_sha256 = sha256_for(macos_intel_url, 'PLACEHOLDER_SHA256_X64_DMG')
 
 template_path = File.join(__dir__, '..', 'packaging', 'homebrew', 'Casks', 'ani-desk.rb.template')
 unless File.exist?(template_path)

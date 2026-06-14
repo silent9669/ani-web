@@ -10,9 +10,11 @@
 
 ## 🚀 Installation & Download
 
-`ani-desk` is available for macOS, Windows, and Linux. Choose the installation method that fits your operating system.
+`ani-desk` is available for Apple Silicon macOS, Windows, and Linux. Choose the installation method that fits your operating system.
 
 ### 🍏 macOS Installation (Recommended)
+
+macOS support for v1.0.0 is Apple Silicon only (M1/M2/M3/M4 or newer) on macOS 15+.
 
 #### Option 1: Via Homebrew Cask (Easiest & Safest)
 The recommended way to install and manage updates for `ani-desk` on macOS is via Homebrew:
@@ -25,8 +27,7 @@ brew install --cask silent9669/ani-desk/ani-desk
 
 #### Option 2: Direct DMG Download
 You can download the `.dmg` installer directly from the [GitHub Releases](https://github.com/silent9669/ani-desk/releases) page:
-- **Apple Silicon (M1/M2/M3)**: `ani-desk_1.0.0_aarch64.dmg`
-- **Intel**: `ani-desk_1.0.0_x64.dmg`
+- **Apple Silicon (M-series Macs)**: `ani-desk_1.0.0_aarch64.dmg`
 
 ⚠️ **Apple Gatekeeper Bypass Instructions**  
 Because direct DMG downloads are unsigned, macOS Gatekeeper will block the application on first launch and show a warning such as **"developer cannot be verified"** or **"app is damaged and cannot be opened"**. 
@@ -138,7 +139,7 @@ Explore the user interface and key features of `ani-desk`:
    ```bash
    npm run icons
    ```
-6. Build a local macOS app/DMG:
+6. Build a local Apple Silicon macOS app/DMG:
    ```bash
    npm run tauri -- build --bundles app,dmg
    ```
@@ -170,7 +171,7 @@ npm run tauri -- build --debug --no-bundle
 
 ## 🚢 CI/CD & Releases
 
-CI runs on the `master` branch. A pushed tag such as `v1.0.0` builds cross-platform Tauri bundles through GitHub Actions, uploads SHA256 files, and publishes the Homebrew cask to `silent9669/homebrew-ani-desk`.
+CI runs on the `master` branch. A pushed tag such as `v1.0.0` builds Apple Silicon macOS, Windows, and Linux Tauri bundles through GitHub Actions, uploads SHA256 files, verifies public release URLs, and then publishes the Homebrew cask to `silent9669/homebrew-ani-desk`.
 
 - **Cask template location**: `packaging/homebrew/Casks/ani-desk.rb.template`
 - **Cask output location**: `packaging/homebrew/Casks/ani-desk.rb`

@@ -48,7 +48,7 @@
     "shortDescription": "Anime streaming desktop app",
     "longDescription": "ani-desk is a Netflix-inspired desktop interface for searching and watching anime from multiple sources.",
     "macOS": {
-      "minimumSystemVersion": "10.13",
+      "minimumSystemVersion": "15.0",
       "dmg": {
         "background": "../packaging/macos/dmg-background.png",
         "windowSize": {

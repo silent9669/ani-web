@@ -15,7 +15,7 @@ Remote target: `https://github.com/silent9669/ani-desk`
 
 4. **Search & Episode UI/UX Polish** — Search keeps the fixed one-window layout with stronger command bar styling. Detail episodes now use a range rail plus dense active-range list, so 1,000+ episode shows render only one 50-episode range at a time.
 
-5. **Release Validation Prep** — The release workflow and Homebrew Cask packaging target `silent9669/homebrew-ani-desk`; the local tap checkout is expected at `/Users/phucdang/Documents/homebrew-ani-desk` when deployment validation begins.
+5. **Release Validation Prep** — The release workflow and Homebrew Cask packaging target Apple Silicon macOS 15+, Windows x64, and Linux x64 artifacts; the local tap checkout is expected at `/Users/phucdang/Documents/homebrew-ani-desk` when deployment validation begins.
 
 6. **Recent UI/UX Enhancements**:
    - **Centered Single Watermark Background**: Replaced repeating/tiled backgrounds with a single centered watermark background logo to maintain a professional, minimalist aesthetic.
@@ -43,7 +43,7 @@ The 2026-06-13 UI/UX pass implemented the compact Netflix-style Home/Search/deta
 - Dashboard command center with logo/search/provider controls, Continue Watching banners, and always-visible My List shelf
 - Dual-pane animated search with fixed viewport layout and red accent borders
 - Detail route with scalable range rail + active episode list and left-border hover accents
-- Homebrew Cask metadata, real Tauri bundle release workflow, and platform install helpers exist for macOS, Windows, and Linux
+- Homebrew Cask metadata, real Tauri bundle release workflow, and platform install helpers exist for Apple Silicon macOS 15+, Windows, and Linux
 
 ## Verification
 

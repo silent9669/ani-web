@@ -13,6 +13,12 @@ if ! command -v brew >/dev/null 2>&1; then
     exit 1
 fi
 
+ARCH="$(uname -m)"
+if [ "$ARCH" != "arm64" ]; then
+    printf 'ani-desk v1.0.0 supports Apple Silicon Macs only. Detected architecture: %s\n' "$ARCH" >&2
+    exit 1
+fi
+
 status "Installing ani-desk.app with Homebrew Cask"
 brew install --cask silent9669/ani-desk/ani-desk
 
