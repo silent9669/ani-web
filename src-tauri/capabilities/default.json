@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default desktop capability for ani-desk",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "process:default",
+    "updater:default"
+  ]
 }

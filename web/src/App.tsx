@@ -23,8 +23,15 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { animeKey, api, favoriteToAnime } from "./api";
 import type { Anime, AnimeDetails, Episode, Favorite, PlayerContext, Source, WatchHistory } from "./types";
+import {
+  type AppUpdateState,
+  checkForAppUpdate,
+  downloadAndInstallAppUpdate,
+  relaunchApp,
+} from "./updater";
 
 const SOURCE_STORAGE_KEY = "ani-desk:selected-source";
 const EPISODE_RANGE_SIZE = 50;
@@ -56,10 +63,20 @@ function App() {
   const [route, setRoute] = useState<Route>("home");
   const [routeStack, setRouteStack] = useState<Route[]>([]);
   const detailCacheRef = useRef<Record<string, Partial<Anime>>>({});
+  const pendingUpdateRef = useRef<Update | null>(null);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: "idle" });
 
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (bootstrapping || !isTauriRuntime()) return;
+    const handle = window.setTimeout(() => {
+      void checkAppUpdates();
+    }, 900);
+    return () => window.clearTimeout(handle);
+  }, [bootstrapping]);
 
   useEffect(() => {
     const userAgent = navigator.userAgent.toLowerCase();
@@ -119,6 +136,59 @@ function App() {
     ]);
     setContinueWatching(history);
     setMyList(favorites);
+  }
+
+  async function checkAppUpdates() {
+    setAppUpdate({ status: "checking" });
+    try {
+      const update = await checkForAppUpdate();
+      pendingUpdateRef.current = update;
+
+      if (!update) {
+        setAppUpdate({ status: "idle" });
+        return;
+      }
+
+      setAppUpdate({
+        status: "available",
+        version: update.version,
+        currentVersion: update.currentVersion,
+        notes: update.body,
+      });
+    } catch (err) {
+      setAppUpdate({
+        status: "error",
+        message: `Update check failed: ${errorMessage(err)}`,
+      });
+    }
+  }
+
+  async function installUpdate() {
+    const update = pendingUpdateRef.current;
+    if (!update) return;
+
+    setAppUpdate((current) => ({ ...current, status: "downloading", progress: 0, message: undefined }));
+    try {
+      await downloadAndInstallAppUpdate(update, (progress) => {
+        setAppUpdate((current) => ({
+          ...current,
+          status: "downloading",
+          progress: progress.percent,
+          message: progress.total
+            ? `${formatBytes(progress.downloaded)} / ${formatBytes(progress.total)}`
+            : `${formatBytes(progress.downloaded)} downloaded`,
+        }));
+      });
+
+      setAppUpdate((current) => ({ ...current, status: "ready", progress: 100, message: "Update installed. Relaunching ani-desk..." }));
+      await relaunchApp();
+    } catch (err) {
+      setAppUpdate((current) => ({
+        ...current,
+        status: "error",
+        message: `Update failed: ${errorMessage(err)}`,
+      }));
+    }
   }
 
   function navigate(nextRoute: Route) {
@@ -406,6 +476,14 @@ function App() {
       </main>
 
       <AnimatePresence>
+        {appUpdate.status !== "idle" && appUpdate.status !== "checking" && (
+          <UpdatePrompt
+            key="update-prompt"
+            state={appUpdate}
+            onInstall={() => void installUpdate()}
+            onDismiss={() => setAppUpdate({ status: "idle" })}
+          />
+        )}
         {player && (
           <VideoPlayer
             key="video-player"
@@ -438,6 +516,62 @@ function BootSplash() {
         transition={{ duration: 1.4, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" }}
       />
     </div>
+  );
+}
+
+function UpdatePrompt({
+  state,
+  onInstall,
+  onDismiss,
+}: {
+  state: AppUpdateState;
+  onInstall: () => void;
+  onDismiss: () => void;
+}) {
+  const installing = state.status === "downloading" || state.status === "ready";
+  const isError = state.status === "error";
+
+  return (
+    <motion.aside
+      className={`update-prompt update-prompt-${state.status}`}
+      initial={{ opacity: 0, y: -18, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -12, scale: 0.98 }}
+      transition={{ duration: 0.22, ease: "easeOut" }}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="update-prompt-icon">
+        {state.status === "downloading" ? <Loader2 className="spin" size={20} /> : <Check size={20} />}
+      </div>
+      <div className="update-prompt-copy">
+        <strong>{isError ? "Update could not finish" : state.status === "ready" ? "Update installed" : `ani-desk ${state.version} is available`}</strong>
+        <span>
+          {state.message ||
+            (state.notes
+              ? state.notes
+              : state.currentVersion
+                ? `You are running ${state.currentVersion}.`
+                : "A signed update is ready to install.")}
+        </span>
+        {state.status === "downloading" && (
+          <div className="update-progress" aria-label="Update download progress">
+            <i style={{ width: `${state.progress ?? 8}%` }} />
+          </div>
+        )}
+      </div>
+      <div className="update-prompt-actions">
+        {state.status === "available" && (
+          <button className="primary" onClick={onInstall}>
+            <ChevronRight size={17} />
+            Update
+          </button>
+        )}
+        <button onClick={onDismiss} disabled={installing}>
+          {isError ? "Dismiss" : "Later"}
+        </button>
+      </div>
+    </motion.aside>
   );
 }
 
@@ -511,31 +645,29 @@ function HomeDashboard({
         </motion.div>
       </motion.div>
 
-      {continueItems.length === 0 && savedAnime.length === 0 ? null : (
-        <div className="dashboard-shelves">
-          <ContinueWatchingRow
-            items={continueItems}
-            total={continueTotal}
-            onOpen={onResumeHistory}
-            onShowMore={onShowHistory}
-            myList={myList}
-            onToggleFavorite={(item) => onToggleFavorite(historyToAnime(item, myList))}
-            onRemove={onRemoveHistory}
-          />
-          <AnimeRow
-            title="My List"
-            items={savedAnime}
-            total={savedTotal}
-            onOpen={onOpenAnime}
-            onShowMore={onShowMyList}
-            myList={myList}
-            onToggleFavorite={onToggleFavorite}
-            onRemove={onToggleFavorite}
-            emptyTitle="Your list is empty"
-            emptySubtitle="Search and add titles to keep them here."
-          />
-        </div>
-      )}
+      <div className="dashboard-shelves">
+        <ContinueWatchingRow
+          items={continueItems}
+          total={continueTotal}
+          onOpen={onResumeHistory}
+          onShowMore={onShowHistory}
+          myList={myList}
+          onToggleFavorite={(item) => onToggleFavorite(historyToAnime(item, myList))}
+          onRemove={onRemoveHistory}
+        />
+        <AnimeRow
+          title="My List"
+          items={savedAnime}
+          total={savedTotal}
+          onOpen={onOpenAnime}
+          onShowMore={onShowMyList}
+          myList={myList}
+          onToggleFavorite={onToggleFavorite}
+          onRemove={onToggleFavorite}
+          emptyTitle="Your list is empty"
+          emptySubtitle="Search and add titles to keep them here."
+        />
+      </div>
     </section>
   );
 }
@@ -587,7 +719,7 @@ function ContinueWatchingRow({
   return (
     <motion.section className="content-row" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24 }}>
       <RowHeading title="Continue Watching" total={total} onShowMore={onShowMore} />
-      <div className="card-row">
+      <div className={items.length ? "card-row" : "card-row empty-row"}>
         {items.length ? (
           items.map((item) => (
             <HistoryCard
@@ -635,7 +767,7 @@ function AnimeRow({
   return (
     <motion.section className="content-row" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, delay: 0.04 }}>
       <RowHeading title={title} total={total ?? items.length} onShowMore={onShowMore} />
-      <div className="card-row">
+      <div className={loading || items.length ? "card-row" : "card-row empty-row"}>
         {loading
           ? Array.from({ length: 8 }).map((_, index) => <div className="poster-card skeleton" key={index} />)
           : items.length
@@ -658,6 +790,7 @@ function AnimeRow({
 function ShelfEmptyCard({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="shelf-empty-card">
+      <img src={LOGO_SRC} alt="" />
       <div>
         <strong>{title}</strong>
         <span>{subtitle}</span>
@@ -1229,80 +1362,19 @@ function DetailPage({
         <IconButton label="Back" className="detail-back-button" onClick={onBack}>
           <ArrowLeft size={21} />
         </IconButton>
-        <div className="detail-hero" style={{ backgroundImage: `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` }}>
-          <div>
-            <p className="eyebrow">{anime.provider} / {anime.language}</p>
-            <h2>{anime.title}</h2>
-            <p>{anime.synopsis || "Episodes are loaded directly from the selected source."}</p>
-            <div className="detail-actions">
-              {resumeEpisode && (
-                <button className="primary" onClick={() => onPlay(resumeEpisode, resumeHistory?.positionSeconds ?? 0)}>
-                  <Play size={18} />
-                  Resume E{resumeEpisode.number}
-                </button>
-              )}
-              <button className={resumeEpisode ? "" : "primary"} disabled={!firstEpisode} onClick={() => firstEpisode && onPlay(firstEpisode)}>
-                <Play size={18} />
-                Episode 1
+        <div className="detail-chooser-grid" style={{ "--detail-bg": `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` } as React.CSSProperties}>
+          <aside className="episode-range-panel">
+            <div className="episode-range-heading">
+              <p className="eyebrow">{anime.provider}</p>
+              <h3>Ranges</h3>
+              <span>{episodes.length} total</span>
+            </div>
+            {resumeEpisode && (
+              <button className="episode-resume-jump" onClick={() => focusEpisode(resumeEpisode)}>
+                <Clock size={15} />
+                E{resumeEpisode.number} at {formatTime(resumeHistory?.positionSeconds ?? 0)}
               </button>
-              <button disabled={!latestEpisode} onClick={() => latestEpisode && onPlay(latestEpisode)}>
-                <Clock size={18} />
-                Latest
-              </button>
-              <button onClick={onToggleMyList}>
-                {isFavorite ? (
-                  <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
-                ) : (
-                  <Star size={18} style={{ color: "var(--red)" }} />
-                )}
-                {isFavorite ? "In My List" : "My List"}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="episode-panel">
-          <div className="episode-heading">
-            <div>
-              <h3>Episodes</h3>
-              <span>Range {activeRangeLabel} / {episodes.length} total</span>
-            </div>
-            <div className="episode-heading-actions">
-              {resumeEpisode && (
-                <button className="episode-resume-jump" onClick={() => focusEpisode(resumeEpisode)}>
-                  <Clock size={15} />
-                  E{resumeEpisode.number} at {formatTime(resumeHistory?.positionSeconds ?? 0)}
-                </button>
-              )}
-              <strong>{visibleEpisodes.length} shown</strong>
-            </div>
-          </div>
-          <div className="episode-toolbar">
-            <label>
-              <Search size={17} />
-              <input
-                value={episodeQuery}
-                placeholder="Episode number or title"
-                onChange={(event) => setEpisodeQuery(event.target.value)}
-              />
-            </label>
-            <div className="episode-sort">
-              <button className={!latestFirst ? "active" : ""} onClick={() => setLatestFirst(false)}>First</button>
-              <button className={latestFirst ? "active" : ""} onClick={() => setLatestFirst(true)}>Latest</button>
-            </div>
-            <div className="episode-jump">
-              <input
-                value={jumpEpisode}
-                inputMode="numeric"
-                placeholder="Jump"
-                onChange={(event) => setJumpEpisode(event.target.value.replace(/\D/g, ""))}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") playJumpTarget();
-                }}
-              />
-              <button disabled={!jumpTarget} onClick={playJumpTarget}>Go</button>
-            </div>
-          </div>
-          <div className="episode-browser">
+            )}
             <nav className="episode-range-rail" aria-label="Episode ranges">
               {baseRanges.map((range, index) => {
                 const first = range[0]?.number;
@@ -1325,6 +1397,44 @@ function DetailPage({
                 );
               })}
             </nav>
+          </aside>
+
+          <section className="episode-panel episode-list-panel">
+            <div className="episode-heading">
+              <div>
+                <h3>Episodes</h3>
+                <span>Range {activeRangeLabel} / {episodes.length} total</span>
+              </div>
+              <div className="episode-heading-actions">
+                <strong>{visibleEpisodes.length} shown</strong>
+              </div>
+            </div>
+            <div className="episode-toolbar">
+              <label>
+                <Search size={17} />
+                <input
+                  value={episodeQuery}
+                  placeholder="Episode number or title"
+                  onChange={(event) => setEpisodeQuery(event.target.value)}
+                />
+              </label>
+              <div className="episode-sort">
+                <button className={!latestFirst ? "active" : ""} onClick={() => setLatestFirst(false)}>First</button>
+                <button className={latestFirst ? "active" : ""} onClick={() => setLatestFirst(true)}>Latest</button>
+              </div>
+              <div className="episode-jump">
+                <input
+                  value={jumpEpisode}
+                  inputMode="numeric"
+                  placeholder="Jump"
+                  onChange={(event) => setJumpEpisode(event.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") playJumpTarget();
+                  }}
+                />
+                <button disabled={!jumpTarget} onClick={playJumpTarget}>Go</button>
+              </div>
+            </div>
             <div className="episode-list-shell">
               {loading ? <p className="empty-state">Loading episodes...</p> : null}
               {!loading && !visibleEpisodes.length ? <p className="empty-state">No episodes match your filter.</p> : null}
@@ -1363,7 +1473,47 @@ function DetailPage({
                 </motion.div>
               </AnimatePresence>
             </div>
-          </div>
+          </section>
+
+          <aside className="detail-info-panel">
+            <div className="detail-poster-stage">
+              <div className="detail-poster-glow" style={{ backgroundImage: `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` }} />
+              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+            </div>
+            <div className="detail-info-copy">
+              <p className="eyebrow">{anime.provider} / {anime.language}</p>
+              <h2>{anime.title}</h2>
+              <p>{anime.synopsis || "Episodes are loaded directly from the selected source."}</p>
+              <div className="preview-meta">
+                <span><Film size={16} /> {episodes.length || anime.totalEpisodes || 0} episodes</span>
+                <span><SlidersHorizontal size={16} /> {activeRangeLabel}</span>
+              </div>
+              <div className="detail-actions">
+                {resumeEpisode && (
+                  <button className="primary" onClick={() => onPlay(resumeEpisode, resumeHistory?.positionSeconds ?? 0)}>
+                    <Play size={18} />
+                    Resume E{resumeEpisode.number}
+                  </button>
+                )}
+                <button className={resumeEpisode ? "" : "primary"} disabled={!firstEpisode} onClick={() => firstEpisode && onPlay(firstEpisode)}>
+                  <Play size={18} />
+                  Episode 1
+                </button>
+                <button disabled={!latestEpisode} onClick={() => latestEpisode && onPlay(latestEpisode)}>
+                  <Clock size={18} />
+                  Latest
+                </button>
+                <button onClick={onToggleMyList}>
+                  {isFavorite ? (
+                    <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
+                  ) : (
+                    <Star size={18} style={{ color: "var(--red)" }} />
+                  )}
+                  {isFavorite ? "In My List" : "My List"}
+                </button>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </motion.section>
@@ -1860,6 +2010,18 @@ function formatTime(seconds: number) {
     return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   }
   return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** index;
+  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 function errorMessage(error: unknown) {

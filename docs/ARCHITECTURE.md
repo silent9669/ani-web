@@ -21,11 +21,12 @@
 
 ```
 web/src/
-├── App.tsx          # 1648-line monolith: all UI components, routes, player
+├── App.tsx          # Route shell, dashboard/search/detail/player components
 ├── api.ts           # Tauri IPC invoke wrappers
 ├── types.ts         # TypeScript types (Source, Anime, Episode, Playback, etc.)
+├── updater.ts       # Tauri updater check/install/relaunch helpers
 ├── main.tsx         # React root
-└── styles.css       # 1471-line global stylesheet with CSS vars
+└── styles.css       # Global Netflix-style layout, motion, and glass tokens
 
 src/                 # Rust core library (ani-desk-core)
 ├── lib.rs
@@ -33,7 +34,7 @@ src/                 # Rust core library (ani-desk-core)
 ├── db.rs            # SQLite: watch history, favorites
 ├── error.rs
 ├── player.rs        # Axum playback proxy, mpv fallback
-├── update.rs        # Update checker
+├── update.rs        # Legacy version/install metadata helpers
 ├── providers/       # AllAnime, KKPhim, OPhim scraper implementations
 ├── metadata/        # Anime metadata resolution
 ├── image/           # Image handling
@@ -73,9 +74,9 @@ packaging/
 
 | Route | Component | Description |
 |-------|-----------|-------------|
-| `home` | `HomeDashboard` | Hero section + Continue Watching row + My List row |
+| `home` | `HomeDashboard` | Fixed command center + Continue Watching shelf + centered My List shelf |
 | `search` | `SearchStage` | Dual-pane: left results list, right preview panel |
-| `detail` | `DetailPage` | Full anime detail + episode picker with internal episode scrolling |
+| `detail` | `DetailPage` | Three-panel episode chooser: range rail, active episode list, poster/details |
 | `continue` | `HistoryPage` | Full history grid with filter/sort |
 | `my-list` | `MyListPage` | Full favorites grid with filter/sort |
 
@@ -84,20 +85,27 @@ Plus overlays:
 
 ## Key Design Decisions
 
-- **Single-file frontend**: All components live in `App.tsx` (1648 lines). This is intentional for simplicity.
+- **Single-file route surface**: Most UI components still live in `App.tsx` so route state, playback state, and motion transitions remain easy to follow.
 - **CSS variables theme**: Dark theme defined in `:root` in `styles.css`. No CSS framework.
 - **framer-motion**: Used for page transitions, card hover, shared search transition, and player enter/exit.
 - **Provider chips**: Users can switch between 3 providers near the search bar.
 - **Episode ranges**: For long-running shows (500+ episodes), episodes are chunked into ranges of 50.
 - **Playback proxy**: Axum binds to 127.0.0.1, rewrites HLS playlists so provider headers are applied safely.
+- **Signed updates**: Tauri updater checks GitHub `latest.json`, prompts in-app, installs signed updater artifacts, and relaunches.
 
 ## Verification Commands
 
 ```bash
 npm run build
+npm run check:icons
+npm run check:release-version -- v1.0.1
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo audit
+pytest tests/e2e
 npm run tauri -- build --debug --no-bundle
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
 npm run tauri -- build --bundles app,dmg
 ```

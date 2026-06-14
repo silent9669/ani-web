@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("---------------------------------------");
 
     let confirmed = Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Do you want to install ani-desk (v1.0.0) and dependencies?")
+        .with_prompt("Do you want to install ani-desk (v1.0.1) and dependencies?")
         .default(true)
         .interact()?;
 

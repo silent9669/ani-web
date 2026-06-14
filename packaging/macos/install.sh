@@ -15,7 +15,7 @@ fi
 
 ARCH="$(uname -m)"
 if [ "$ARCH" != "arm64" ]; then
-    printf 'ani-desk v1.0.0 supports Apple Silicon Macs only. Detected architecture: %s\n' "$ARCH" >&2
+    printf 'ani-desk v1.0.1 supports Apple Silicon Macs only. Detected architecture: %s\n' "$ARCH" >&2
     exit 1
 fi
 
@@ -27,4 +27,4 @@ if ! command -v mpv >/dev/null 2>&1; then
 fi
 
 status "Installation complete. Launch ani-desk from Applications, Spotlight, or Launchpad."
-status "Artifacts are unsigned for v1.0; allow ani-desk in Privacy & Security if macOS blocks first launch."
+status "Artifacts are unsigned. If macOS blocks first launch, run: xattr -cr /Applications/ani-desk.app"

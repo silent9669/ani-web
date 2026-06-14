@@ -30,6 +30,11 @@ def test_t1_dashboard_continue_watching_shelf(mocked_page):
     card = shelf.locator(".poster-card")
     expect(card.first).to_be_visible()
     expect(card.locator("span").first).to_have_text("One Piece")
+    is_vertical = card.first.evaluate("""node => {
+        const box = node.getBoundingClientRect();
+        return box.height > box.width;
+    }""")
+    assert is_vertical is True
 
 def test_t1_dashboard_my_list_shelf(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('My List')")
@@ -51,6 +56,15 @@ def test_t1_dashboard_no_page_scroll(mocked_page):
     mocked_page.set_viewport_size({"width": 1440, "height": 900})
     scroll = mocked_page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight")
     assert scroll is True
+
+def test_t1_dashboard_shelves_hide_scrollbars(mocked_page):
+    scrollbar_hidden = mocked_page.evaluate("""() => {
+        return Array.from(document.querySelectorAll('.home-dashboard .card-row')).every((row) => {
+            const style = getComputedStyle(row);
+            return style.scrollbarWidth === 'none';
+        });
+    }""")
+    assert scrollbar_hidden is True
     mocked_page.set_viewport_size({"width": 1100, "height": 720})
     scroll = mocked_page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight")
     assert scroll is True
@@ -123,6 +137,10 @@ def test_t1_episode_page_open(mocked_page):
     mocked_page.locator(".search-result").first.click()
     mocked_page.locator(".detail-actions button.primary").click()
     expect(mocked_page.locator(".detail-page")).to_be_visible()
+    expect(mocked_page.locator(".detail-chooser-grid")).to_be_visible()
+    expect(mocked_page.locator(".episode-range-panel")).to_be_visible()
+    expect(mocked_page.locator(".episode-list-panel")).to_be_visible()
+    expect(mocked_page.locator(".detail-info-panel")).to_be_visible()
 
 def test_t1_episode_list_visibility(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
@@ -295,6 +313,15 @@ def test_t2_dashboard_empty_my_list(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('My List')")
     expect(shelf).to_be_visible()
     expect(shelf.locator(".shelf-empty-card")).to_be_visible()
+    expect(shelf.locator(".shelf-empty-card strong")).to_have_text("Your list is empty")
+    centered = shelf.locator(".shelf-empty-card").evaluate("""node => {
+        const row = node.closest('.card-row').getBoundingClientRect();
+        const card = node.getBoundingClientRect();
+        const rowCenter = row.left + row.width / 2;
+        const cardCenter = card.left + card.width / 2;
+        return Math.abs(rowCenter - cardCenter) < 24;
+    }""")
+    assert centered is True
 
 def test_t2_dashboard_long_anime_title(mocked_page):
     mocked_page.evaluate("""() => {
@@ -412,6 +439,43 @@ def test_t2_episode_stress_range_jump_and_filter(mocked_page):
     expect(mocked_page.locator(".episode-list-row")).to_have_count(1)
     page_scroll = mocked_page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight")
     assert page_scroll is True
+    scrollbars_hidden = mocked_page.evaluate("""() => {
+        const rail = document.querySelector('.episode-range-rail');
+        const list = document.querySelector('.episode-list');
+        return !!rail && !!list &&
+            getComputedStyle(rail).scrollbarWidth === 'none' &&
+            getComputedStyle(list).scrollbarWidth === 'none';
+    }""")
+    assert scrollbars_hidden is True
+
+def test_t2_updater_available_prompt_and_install(mocked_page):
+    mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        state.update_available = true;
+        localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
+    }""")
+    mocked_page.reload()
+    mocked_page.wait_for_selector(".update-prompt")
+    expect(mocked_page.locator(".update-prompt")).to_contain_text("ani-desk 1.0.1 is available")
+    mocked_page.locator(".update-prompt .primary").click()
+    expect(mocked_page.locator(".update-prompt")).to_contain_text("Update installed")
+    relaunched = mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        return state.relaunched === true && state.update_installed === true;
+    }""")
+    assert relaunched is True
+
+def test_t2_updater_error_fallback(mocked_page):
+    mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        state.update_available = true;
+        state.update_install_error = "signature rejected";
+        localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
+    }""")
+    mocked_page.reload()
+    mocked_page.wait_for_selector(".update-prompt")
+    mocked_page.locator(".update-prompt .primary").click()
+    expect(mocked_page.locator(".update-prompt")).to_contain_text("Update failed")
 
 def test_t2_episode_jump_out_of_bounds(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()

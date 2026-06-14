@@ -9,7 +9,7 @@ on:
       version:
         description: "Release tag to publish"
         required: true
-        default: "v1.0.0"
+        default: "v1.0.1"
 
 permissions:
   contents: write
@@ -49,6 +49,15 @@ jobs:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
         run: npm run check:release-version -- "$RELEASE_TAG"
 
+      - name: Verify updater signing secret
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required for signed updater artifacts." >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.name }}
     needs: validate
@@ -58,7 +67,7 @@ jobs:
       matrix:
         include:
           - name: macos-aarch64
-            os: macos-latest
+            os: macos-15
             target: aarch64-apple-darwin
             build_args: "--target aarch64-apple-darwin --bundles app,dmg --ci"
             collect_platform: macos-aarch64
@@ -121,6 +130,9 @@ jobs:
         run: npm ci
 
       - name: Build Tauri bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri -- build ${{ matrix.build_args }}
 
       - name: Normalize release artifacts
@@ -149,6 +161,11 @@ jobs:
       - name: List release artifacts
         run: find release-artifacts -maxdepth 1 -type f -print | sort
 
+      - name: Generate updater manifest
+        run: |
+          node scripts/generate-updater-manifest.mjs "${{ needs.validate.outputs.tag }}" release-artifacts
+          find release-artifacts -maxdepth 1 -type f -print | sort
+
       - name: Remove existing release before replacement
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,11 +189,12 @@ jobs:
             - macOS `.dmg` app bundle for Apple Silicon Macs on macOS 15+
             - Windows NSIS setup and MSI installers
             - Linux AppImage, deb, and rpm packages
+            - Signed Tauri updater metadata in `latest.json`
 
             The app icon is generated from `logo.png` and appears in Finder/Dock,
             Start Menu/taskbar, and Linux desktop launchers where supported.
 
-            These v1.0 artifacts are unsigned. macOS Gatekeeper or Windows
+            These artifacts are unsigned. macOS Gatekeeper or Windows
             SmartScreen may ask you to approve the app on first launch.
 
   verify-release-assets:
@@ -194,16 +212,28 @@ jobs:
           assets=(
             "ani-desk_${VERSION}_aarch64.dmg"
             "ani-desk_${VERSION}_aarch64.dmg.sha256"
+            "ani-desk_${VERSION}_aarch64.app.tar.gz"
+            "ani-desk_${VERSION}_aarch64.app.tar.gz.sha256"
+            "ani-desk_${VERSION}_aarch64.app.tar.gz.sig"
+            "ani-desk_${VERSION}_aarch64.app.tar.gz.sig.sha256"
             "ani-desk_${VERSION}_x64-setup.exe"
             "ani-desk_${VERSION}_x64-setup.exe.sha256"
+            "ani-desk_${VERSION}_x64-setup.exe.sig"
+            "ani-desk_${VERSION}_x64-setup.exe.sig.sha256"
             "ani-desk_${VERSION}_x64.msi"
             "ani-desk_${VERSION}_x64.msi.sha256"
+            "ani-desk_${VERSION}_x64.msi.sig"
+            "ani-desk_${VERSION}_x64.msi.sig.sha256"
             "ani-desk_${VERSION}_amd64.AppImage"
             "ani-desk_${VERSION}_amd64.AppImage.sha256"
+            "ani-desk_${VERSION}_amd64.AppImage.sig"
+            "ani-desk_${VERSION}_amd64.AppImage.sig.sha256"
             "ani-desk_${VERSION}_amd64.deb"
             "ani-desk_${VERSION}_amd64.deb.sha256"
             "ani-desk_${VERSION}_x86_64.rpm"
             "ani-desk_${VERSION}_x86_64.rpm.sha256"
+            "latest.json"
+            "latest.json.sha256"
           )
 
           for asset in "${assets[@]}"; do
@@ -220,6 +250,25 @@ jobs:
               sleep 10
             done
           done
+
+      - name: Validate updater manifest
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/silent9669/ani-desk/releases/download/${TAG}/latest.json"
+          curl --fail --silent --show-error --location "$url" -o latest.json
+          jq -e --arg version "$VERSION" '
+            .version == $version and
+            (.platforms["darwin-aarch64"].url | endswith("_aarch64.app.tar.gz")) and
+            (.platforms["darwin-aarch64"].signature | length > 20) and
+            (.platforms["windows-x86_64"].url | endswith("_x64-setup.exe")) and
+            (.platforms["windows-x86_64"].signature | length > 20) and
+            (.platforms["linux-x86_64"].url | endswith("_amd64.AppImage")) and
+            (.platforms["linux-x86_64"].signature | length > 20) and
+            (.platforms["darwin-x86_64"] == null)
+          ' latest.json
 
   publish-homebrew-cask:
     name: Publish Homebrew cask

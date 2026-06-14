@@ -24,8 +24,8 @@ cask "ani-desk" do
   ]
 
   caveats <<~EOS
-    ani-desk v1.0 artifacts are unsigned. If macOS blocks the first launch,
-    open System Settings > Privacy & Security and allow ani-desk.
+    ani-desk artifacts are unsigned. If macOS blocks the first launch, run:
+      xattr -cr /Applications/ani-desk.app
 
     mpv is optional for fallback playback:
       brew install mpv

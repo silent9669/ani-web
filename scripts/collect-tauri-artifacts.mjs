@@ -8,14 +8,19 @@ const outputDir = 'release-artifacts';
 
 const artifactMap = {
   'macos-aarch64': [
-    { bundleDir: 'dmg', ext: '.dmg', name: `ani-desk_${version}_aarch64.dmg` }
+    { bundleDir: 'dmg', ext: '.dmg', name: `ani-desk_${version}_aarch64.dmg` },
+    { bundleDir: 'macos', ext: '.app.tar.gz', name: `ani-desk_${version}_aarch64.app.tar.gz` },
+    { bundleDir: 'macos', ext: '.app.tar.gz.sig', name: `ani-desk_${version}_aarch64.app.tar.gz.sig` }
   ],
   'windows-x64': [
     { bundleDir: 'nsis', ext: '.exe', name: `ani-desk_${version}_x64-setup.exe` },
-    { bundleDir: 'msi', ext: '.msi', name: `ani-desk_${version}_x64.msi` }
+    { bundleDir: 'nsis', ext: '.exe.sig', name: `ani-desk_${version}_x64-setup.exe.sig` },
+    { bundleDir: 'msi', ext: '.msi', name: `ani-desk_${version}_x64.msi` },
+    { bundleDir: 'msi', ext: '.msi.sig', name: `ani-desk_${version}_x64.msi.sig` }
   ],
   'linux-x64': [
     { bundleDir: 'appimage', ext: '.AppImage', name: `ani-desk_${version}_amd64.AppImage` },
+    { bundleDir: 'appimage', ext: '.AppImage.sig', name: `ani-desk_${version}_amd64.AppImage.sig` },
     { bundleDir: 'deb', ext: '.deb', name: `ani-desk_${version}_amd64.deb` },
     { bundleDir: 'rpm', ext: '.rpm', name: `ani-desk_${version}_x86_64.rpm` }
   ]

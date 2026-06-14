@@ -7,7 +7,7 @@ require 'open-uri'
 
 if ARGV.empty?
   puts "Usage: #{$PROGRAM_NAME} VERSION [OUTPUT]"
-  puts "Example: #{$PROGRAM_NAME} v1.0.0 packaging/homebrew/Casks/ani-desk.rb"
+  puts "Example: #{$PROGRAM_NAME} v1.0.1 packaging/homebrew/Casks/ani-desk.rb"
   exit 1
 end
 

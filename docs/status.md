@@ -3,7 +3,7 @@
 Local workspace: `/Users/phucdang/Documents/ani-desk`
 Remote target: `https://github.com/silent9669/ani-desk`
 
-## Current Phase: Compact Command UI Upgrade (2026-06-13)
+## Current Phase: v1.0.1 Updater, Installer, And Chooser Polish (2026-06-14)
 
 ### Latest Changes (UI/UX Refinement Pass)
 
@@ -13,11 +13,15 @@ Remote target: `https://github.com/silent9669/ani-desk`
 
 3. **Stable Shelves** — Continue Watching and My List always render on Home. Empty shelves use compact logo placeholders, and the Continue Watching progress bar now lives inside the thumbnail/banner area instead of overlapping episode text.
 
-4. **Search & Episode UI/UX Polish** — Search keeps the fixed one-window layout with stronger command bar styling. Detail episodes now use a range rail plus dense active-range list, so 1,000+ episode shows render only one 50-episode range at a time.
+4. **Search & Episode UI/UX Polish** — Search keeps the fixed one-window layout with stronger command bar styling. Detail episodes now use a three-panel chooser: 50-episode range rail, active episode list, and vertical poster/details panel.
 
 5. **Release Validation Prep** — The release workflow and Homebrew Cask packaging target Apple Silicon macOS 15+, Windows x64, and Linux x64 artifacts; the local tap checkout is expected at `/Users/phucdang/Documents/homebrew-ani-desk` when deployment validation begins.
 
-6. **Recent UI/UX Enhancements**:
+6. **v1.0.1 Enhancements**:
+   - **Signed Tauri Updater**: The desktop app checks signed GitHub release metadata, prompts users, downloads the updater artifact, installs it, and relaunches.
+   - **Installer Polish**: macOS DMG config and docs now use the direct Applications flow with `xattr -cr /Applications/ani-desk.app` for unsigned builds.
+   - **Vertical Dashboard Cards**: Continue Watching uses poster-oriented cards on Home, with hidden shelf scrollbars and watch progress pinned inside the image area.
+   - **Three-Panel Episode Chooser**: Detail no longer uses a top hero banner; it keeps ranges, episodes, and vertical anime artwork visible in separate panels.
    - **Centered Single Watermark Background**: Replaced repeating/tiled backgrounds with a single centered watermark background logo to maintain a professional, minimalist aesthetic.
    - **Search UI Margin Adjustment**: Adjusted margins across the search layout to ensure a balanced, spacious, and pixel-perfect presentation.
    - **Framed Empty State for My List**: Nested the empty state message for the My List shelf in a clean, framed card container to match other grid modules and dashboard aesthetics.
@@ -40,9 +44,10 @@ The 2026-06-13 UI/UX pass implemented the compact Netflix-style Home/Search/deta
 - Rust core/provider/database code builds and tests pass
 - Built-in HLS/MP4 playback proxy works
 - 3 providers: AllAnime, KKPhim, OPhim
-- Dashboard command center with logo/search/provider controls, Continue Watching banners, and always-visible My List shelf
+- Dashboard command center with logo/search/provider controls, vertical Continue Watching cards, and always-visible centered My List shelf
 - Dual-pane animated search with fixed viewport layout and red accent borders
-- Detail route with scalable range rail + active episode list and left-border hover accents
+- Detail route with scalable three-panel range rail + active episode list + poster/details panel
+- Signed Tauri updater metadata and in-app update prompt for v1.0.1+
 - Homebrew Cask metadata, real Tauri bundle release workflow, and platform install helpers exist for Apple Silicon macOS 15+, Windows, and Linux
 
 ## Verification
@@ -53,8 +58,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm run check:icons
-npm run check:release-version -- v1.0.0
+npm run check:release-version -- v1.0.1
 npm run tauri -- build --debug --no-bundle
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
 npm run tauri -- build --bundles app,dmg
 ```
 

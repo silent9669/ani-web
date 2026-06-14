@@ -4,16 +4,17 @@
 
 Redesign `ani-desk` from its current functional UI into a premium, animated Netflix-clone experience — simple layout, powerful lightweight animations, with macOS 26 Liquid Glass support.
 
-## Status: R1-R3 Implemented, R4 Foundation Added
+## Status: R1-R4 Implemented, v1.0.1 Release Polish Added
 
 The previous agent session completed:
 - [x] Codebase analysis and architecture mapping
 - [x] E2E test suite design (74 test cases in `tests/e2e/`)
 - [x] **Core Layout & Liquid Glass foundation** — compact fixed Home/Search/detail layout plus macOS transparent titlebar foundation
 - [x] **Animated Search** — shared search-shell zoom, fixed search surface, independent result scrolling
-- [x] **Episode Selection Page** — detail route with internal episode pane, ranges, search, sort, jump, resume/latest/first
-- [ ] **CLI Launch verification** — not yet verified
-- [ ] **Cross-platform build testing** — not yet done
+- [x] **Episode Selection Page** — three-panel detail route with range rail, active episode list, poster/details, search, sort, jump, resume/latest/first
+- [x] **Signed updater foundation** — in-app update prompt plus signed Tauri updater metadata for v1.0.1+
+- [x] **macOS DMG polish** — dark/red drag-to-Applications background and `xattr -cr /Applications/ani-desk.app` unsigned-app guidance
+- [ ] **Cross-platform release validation** — Windows/Linux bundles and tap brewbot run in GitHub release workflow
 
 ---
 
@@ -49,10 +50,9 @@ The previous agent session completed:
 ## R3. Episode Selection Page
 
 **Current state**: `DetailPage` is a dedicated route with:
-- Hero banner, title, synopsis
-- Episode toolbar (search, sort, jump-to-episode)
 - Left range rail for 50-episode chunks
-- Dense active-range list with thumbnail-aware rows and internal scrolling
+- Middle active-range episode list with search, sort, and jump-to-episode
+- Right vertical poster/details panel with synopsis, provider metadata, Resume, First, Latest, and My List actions
 
 **What to change**:
 - Converted from modal to a dedicated `detail` route with contextual Back navigation.
@@ -80,7 +80,7 @@ The previous agent session completed:
 
 **Current state**: Desktop bundle release path exists for Apple Silicon macOS 15+ DMG/app, Windows NSIS/MSI, and Linux AppImage/deb/rpm. Homebrew Cask metadata exists at `packaging/homebrew/Casks/ani-desk.rb`, with tap-side files under `packaging/homebrew-tap/`. The local tap checkout for deployment validation is `/Users/phucdang/Documents/homebrew-ani-desk`.
 
-**Verify**: `ani-desk` command works after install.
+**Verify**: Launch from Finder/Dock, Start Menu/taskbar, and Linux desktop launcher. The terminal command remains a developer fallback only.
 
 ---
 
@@ -89,10 +89,16 @@ The previous agent session completed:
 **Verify locally**:
 ```bash
 npm run build
-cargo check --workspace
-cargo test --workspace
+npm run check:icons
+npm run check:release-version -- v1.0.1
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo audit
+pytest tests/e2e
 npm run tauri -- build --debug --no-bundle
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
 npm run tauri -- build --bundles app,dmg
 ```
 

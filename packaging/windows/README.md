@@ -2,7 +2,7 @@
 
 ## Recommended Installer
 
-Download the latest `ani-desk_1.0.0_x64-setup.exe` from the GitHub Release and run it.
+Download the latest `ani-desk_1.0.1_x64-setup.exe` from the GitHub Release and run it.
 The installer creates Start Menu entries and uses the generated `logo.png` app icon.
 
 PowerShell helper:
@@ -21,7 +21,7 @@ The helper:
 
 Launch ani-desk from the Start Menu after installation.
 
-For MSI validation or enterprise-style install testing, use the release `ani-desk_1.0.0_x64.msi` artifact or run the helper with `-Msi`.
+For MSI validation or enterprise-style install testing, use the release `ani-desk_1.0.1_x64.msi` artifact or run the helper with `-Msi`.
 
 The v1.0 installers are unsigned, so Windows SmartScreen may ask you to approve the first launch.
 

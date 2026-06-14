@@ -43,6 +43,16 @@ def mocked_page(page, vite_server):
     page.add_init_script("""
         window.__TAURI_INTERNALS__ = window.__TAURI_INTERNALS__ || {};
         window.__TAURI_CALLS__ = window.__TAURI_CALLS__ || [];
+        window.__TAURI_CALLBACKS__ = window.__TAURI_CALLBACKS__ || {};
+        window.__TAURI_CALLBACK_ID__ = window.__TAURI_CALLBACK_ID__ || 1;
+        window.__TAURI_INTERNALS__.transformCallback = window.__TAURI_INTERNALS__.transformCallback || ((callback) => {
+            const id = window.__TAURI_CALLBACK_ID__++;
+            window.__TAURI_CALLBACKS__[id] = callback;
+            return id;
+        });
+        window.__TAURI_INTERNALS__.unregisterCallback = window.__TAURI_INTERNALS__.unregisterCallback || ((id) => {
+            delete window.__TAURI_CALLBACKS__[id];
+        });
 
         const getMockState = () => {
             const defaults = {
@@ -74,6 +84,9 @@ def mocked_page(page, vite_server):
                 ],
                 search_error: null,
                 playback_error: null,
+                update_available: false,
+                update_error: null,
+                update_install_error: null,
                 episode_count: 1200
             };
             const stored = localStorage.getItem('__TAURI_MOCK_STATE__');
@@ -99,6 +112,38 @@ def mocked_page(page, vite_server):
 
             if (cmd === "list_sources") {
                 return state.sources;
+            } else if (cmd === "plugin:updater|check") {
+                if (state.update_error) {
+                    throw new Error(state.update_error);
+                }
+                if (!state.update_available) {
+                    return null;
+                }
+                return {
+                    rid: 101,
+                    currentVersion: "1.0.0",
+                    version: "1.0.1",
+                    date: "2026-06-14T00:00:00Z",
+                    body: "Mock v1.0.1 updater release.",
+                    rawJson: {}
+                };
+            } else if (cmd === "plugin:updater|download_and_install") {
+                if (state.update_install_error) {
+                    throw new Error(state.update_install_error);
+                }
+                if (args.onEvent && typeof args.onEvent.onmessage === "function") {
+                    args.onEvent.onmessage({ event: "Started", data: { contentLength: 1000 } });
+                    args.onEvent.onmessage({ event: "Progress", data: { chunkLength: 450 } });
+                    args.onEvent.onmessage({ event: "Progress", data: { chunkLength: 550 } });
+                    args.onEvent.onmessage({ event: "Finished" });
+                }
+                state.update_installed = true;
+                saveMockState(state);
+                return null;
+            } else if (cmd === "plugin:process|restart") {
+                state.relaunched = true;
+                saveMockState(state);
+                return null;
             } else if (cmd === "get_continue_watching") {
                 return state.continue_watching;
             } else if (cmd === "get_my_list") {

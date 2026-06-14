@@ -467,7 +467,12 @@ fn to_string_error(error: impl std::fmt::Display) -> String {
 fn main() {
     tracing_subscriber::fmt::init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default().plugin(tauri_plugin_process::init());
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .setup(|app| {
             let config = Config::load().context("Failed to load ani-desk config")?;
             config.validate().context("Invalid ani-desk config")?;

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-14
+### Added
+- Added signed Tauri updater support with in-app update prompt, download progress, install, and relaunch.
+- Added release generation for `latest.json` updater metadata and signed updater artifacts.
+
+### Changed
+- Redesigned Home shelves around vertical poster cards, hidden scrollbars, and centered empty My List state.
+- Replaced the episode detail hero with a three-panel chooser for 50-episode ranges, active episode list, and poster/details.
+- Refined macOS DMG artwork and first-launch guidance around `xattr -cr /Applications/ani-desk.app`.
+
 ## [3.8.4] - 2026-06-06
 ### Fixed
 - Hardened Windows playback by adding mpv TLS compatibility flags, detached process launch, and fallback player discovery through `ANI_TUI_PLAYER` and portable mpv paths.
