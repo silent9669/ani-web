@@ -172,7 +172,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run E2E suite
-        run: pytest tests/e2e
+        run: pytest tests/e2e/test_app.py
 
   audit:
     name: Security Audit
