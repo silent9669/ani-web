@@ -516,7 +516,15 @@ def test_t2_episode_prepare_playback_failure(mocked_page):
 
 # Liquid Glass Edge Cases (5 tests)
 def test_t2_liquid_glass_platform_class_detected(mocked_page):
-    has_class = mocked_page.evaluate("document.documentElement.classList.contains('platform-macos')")
+    has_class = mocked_page.evaluate("""() => {
+        const ua = navigator.userAgent.toLowerCase();
+        const expected = ua.includes("mac")
+            ? "platform-macos"
+            : ua.includes("win")
+                ? "platform-windows"
+                : "platform-linux";
+        return document.documentElement.classList.contains(expected);
+    }""")
     assert has_class is True
 
 def test_t2_liquid_glass_vibrancy_toggle(mocked_page):
