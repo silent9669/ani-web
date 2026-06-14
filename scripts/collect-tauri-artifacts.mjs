@@ -15,7 +15,7 @@ const artifactMap = {
   ],
   'windows-x64': [
     { bundleDir: 'nsis', ext: '.exe', name: `ani-desk_${version}_x64-setup.exe` },
-    { bundleDir: 'msi', ext: '.msi', name: `ani-desk_${version}_x64.msi` }
+    { bundleDir: 'wix', ext: '.msi', name: `ani-desk_${version}_x64.msi` }
   ],
   'linux-x64': [
     { bundleDir: 'appimage', ext: '.AppImage', name: `ani-desk_${version}_amd64.AppImage` },

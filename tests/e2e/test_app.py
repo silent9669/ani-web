@@ -644,13 +644,17 @@ def test_t4_watchlist_management_scenario(mocked_page):
 
     # 2. Select Demon Slayer from results
     mocked_page.locator(".search-result:has-text('Demon Slayer')").click()
+    expect(mocked_page.locator(".search-preview h1")).to_have_text("Demon Slayer")
 
     # 3. Add to My List
     mocked_page.locator(".search-preview .detail-actions button").nth(1).click()
+    expect(mocked_page.locator(".search-preview .detail-actions button").nth(1)).to_have_text("In My List")
 
     # 4. Select Naruto Shippuden, Add to My List too
     mocked_page.locator(".search-result:has-text('Naruto Shippuden')").click()
+    expect(mocked_page.locator(".search-preview h1")).to_have_text("Naruto Shippuden")
     mocked_page.locator(".search-preview .detail-actions button").nth(1).click()
+    expect(mocked_page.locator(".search-preview .detail-actions button").nth(1)).to_have_text("In My List")
 
     # 5. Go Back to home, click Show More on My List row
     mocked_page.locator("button[aria-label='Back']").click()

@@ -18,7 +18,21 @@ macos_arm_url = "#{release_base}/ani-desk_#{version_without_v}_aarch64.dmg"
 macos_intel_url = "#{release_base}/ani-desk_#{version_without_v}_x64.dmg"
 
 def sha256_for(url, placeholder)
-  Digest::SHA256.hexdigest(URI.open(url).read)
+  filename = File.basename(url)
+  local_paths = [
+    File.expand_path(File.join(__dir__, '..', 'release-artifacts', filename)),
+    File.expand_path(File.join(Dir.pwd, 'release-artifacts', filename)),
+    File.expand_path(File.join(Dir.pwd, filename))
+  ]
+
+  local_path = local_paths.find { |path| File.exist?(path) }
+
+  if local_path
+    puts "Using local file: #{local_path}"
+    Digest::SHA256.file(local_path).hexdigest
+  else
+    Digest::SHA256.hexdigest(URI.open(url).read)
+  end
 rescue OpenURI::HTTPError, SocketError
   return placeholder if ENV['HOMEBREW_CASK_ALLOW_PLACEHOLDERS'] == '1'
 
