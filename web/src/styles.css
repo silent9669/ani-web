@@ -1281,6 +1281,24 @@ main {
   color: var(--text);
 }
 
+.inline-status {
+  display: grid;
+  gap: 0.25rem;
+  margin: -0.15rem 0 0.75rem;
+  border: 1px solid rgba(255, 181, 65, 0.22);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: rgba(255, 181, 65, 0.08);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.inline-status strong {
+  color: #ffc05a;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+}
+
 .search-result {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);

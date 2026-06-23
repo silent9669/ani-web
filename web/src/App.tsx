@@ -66,8 +66,10 @@ function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Anime[]>([]);
   const [catalogResults, setCatalogResults] = useState<CatalogAnime[]>([]);
+  const [providerResults, setProviderResults] = useState<Anime[]>([]);
   const [catalogSelection, setCatalogSelection] = useState<CatalogAnime | null>(null);
   const [availability, setAvailability] = useState<ProviderAvailability[]>([]);
+  const [catalogSearchError, setCatalogSearchError] = useState<AppError | null>(null);
   const [languageGroup, setLanguageGroup] = useState<"english" | "vietnamese">("english");
   const [discovery, setDiscovery] = useState<DiscoveryCatalog | null>(null);
   const [myListCatalog, setMyListCatalog] = useState<CatalogAnime[]>([]);
@@ -85,6 +87,8 @@ function App() {
   const [routeStack, setRouteStack] = useState<Route[]>([]);
   const detailCacheRef = useRef<Record<string, Partial<Anime>>>({});
   const availabilityCacheRef = useRef(new Map<string, { expiresAt: number; items: ProviderAvailability[] }>());
+  const catalogSearchCacheRef = useRef(new Map<string, { expiresAt: number; items: CatalogAnime[] }>());
+  const catalogCooldownUntilRef = useRef(0);
   const availabilityGenerationRef = useRef(0);
   const catalogSearchGenerationRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
@@ -118,14 +122,16 @@ function App() {
     setSelectedSource(null);
     if (cleanQuery.length < 2) {
       setCatalogResults([]);
+      setProviderResults([]);
       setCatalogSelection(null);
+      setCatalogSearchError(null);
       return;
     }
 
     const handle = window.setTimeout(() => void searchCatalog(cleanQuery), 320);
 
     return () => window.clearTimeout(handle);
-  }, [query, route]);
+  }, [query, route, languageGroup]);
 
   useEffect(() => {
     if (route !== "search" || !catalogSelection) return;
@@ -263,29 +269,147 @@ function App() {
     const generation = ++catalogSearchGenerationRef.current;
     if (cleanQuery.length < 2) {
       setCatalogResults([]);
+      setProviderResults([]);
       setCatalogSelection(null);
       setSearchSelection(null);
+      setCatalogSearchError(null);
       return;
     }
 
     setLoading(true);
     setError(null);
+    setCatalogSearchError(null);
+    setAvailability([]);
+    setSearchSelection(null);
+    setSelectedSource(null);
     try {
-      const items = await api.searchCatalog(cleanQuery);
+      const [catalogOutcome, directItems] = await Promise.all([
+        loadCatalogSearchResults(cleanQuery),
+        searchProviderResults(cleanQuery, languageGroup),
+      ]);
       if (generation !== catalogSearchGenerationRef.current) return;
-      setCatalogResults(items);
-      setCatalogSelection((current) => {
-        if (current && items.some((item) => item.catalogId === current.catalogId)) {
-          return current;
+      setProviderResults(directItems);
+      if (catalogOutcome.ok) {
+        const items = catalogOutcome.items;
+        setCatalogResults(items);
+        setCatalogSelection((current) => {
+          if (current && items.some((item) => item.catalogId === current.catalogId)) {
+            return current;
+          }
+          return items[0] ?? null;
+        });
+        if (!items.length && directItems.length) {
+          setSearchSelection(directItems[0]);
+          setSelectedSource(sources.find((source) => source.name === directItems[0].provider) ?? null);
         }
-        return items[0] ?? null;
-      });
-    } catch (err) {
-      if (generation !== catalogSearchGenerationRef.current) return;
-      setError(toAppError(err, "catalog-search"));
+      } else {
+        setCatalogResults([]);
+        setCatalogSelection(null);
+        setCatalogSearchError(catalogOutcome.error);
+        if (directItems.length) {
+          setSearchSelection(directItems[0]);
+          setSelectedSource(sources.find((source) => source.name === directItems[0].provider) ?? null);
+        } else {
+          setSearchSelection(null);
+          setError(catalogOutcome.error);
+        }
+      }
     } finally {
       if (generation === catalogSearchGenerationRef.current) setLoading(false);
     }
+  }
+
+  async function loadCatalogSearchResults(queryText: string): Promise<
+    { ok: true; items: CatalogAnime[] } | { ok: false; error: AppError }
+  > {
+    const cacheKey = queryText.toLowerCase();
+    const cached = catalogSearchCacheRef.current.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ok: true, items: cached.items };
+    }
+    if (catalogCooldownUntilRef.current > Date.now()) {
+      return {
+        ok: false,
+        error: {
+          code: "CATALOG_UNAVAILABLE",
+          message: "AniList is rate limited. Showing provider results when available.",
+          operation: "catalog-search",
+          retryable: true,
+          correlationId: crypto.randomUUID(),
+          technical: "AniList search is cooling down after a 429 response.",
+        },
+      };
+    }
+    try {
+      const items = await api.searchCatalog(queryText);
+      catalogSearchCacheRef.current.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, items });
+      return { ok: true, items };
+    } catch (err) {
+      const appError = toAppError(err, "catalog-search");
+      if (appError.code === "CATALOG_UNAVAILABLE" && `${appError.technical ?? appError.message}`.includes("429")) {
+        catalogCooldownUntilRef.current = Date.now() + 90_000;
+      }
+      return { ok: false, error: appError };
+    }
+  }
+
+  async function searchProviderResults(queryText: string, group: "english" | "vietnamese") {
+    const searchable = sources.filter(
+      (source) =>
+        source.languageGroup === group &&
+        source.status !== "unavailable" &&
+        source.capabilities.search,
+    );
+    const batches = await Promise.allSettled(
+      searchable.map(async (source) => {
+        const items = await api.searchSource(source.name, queryText);
+        return items.map((item) => ({
+          ...item,
+          language: item.language || source.language,
+          isFavorite: myList.some((favorite) => favorite.animeId === animeKey(item.provider, item.id)),
+        }));
+      }),
+    );
+
+    const seen = new Set<string>();
+    return batches
+      .flatMap((batch) => (batch.status === "fulfilled" ? batch.value : []))
+      .filter((item) => {
+        const key = animeKey(item.provider, item.id);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 36);
+  }
+
+  function selectProviderResult(anime: Anime) {
+    setCatalogSelection(null);
+    setAvailability([]);
+    setSelectedSource(sources.find((source) => source.name === anime.provider) ?? null);
+    setSearchSelection(anime);
+  }
+
+  function selectProviderSource(source: Source) {
+    const direct = providerResults.find((anime) => anime.provider === source.name);
+    if (direct) {
+      selectProviderResult(direct);
+      return;
+    }
+    const option = availability.find((item) => item.provider === source.name);
+    if (option?.anime) {
+      void selectCatalogProvider(option);
+    }
+  }
+
+  function selectCatalogResult(anime: CatalogAnime) {
+    setCatalogSelection((current) => {
+      if (current?.catalogId === anime.catalogId) {
+        return current;
+      }
+      return anime;
+    });
+    setSearchSelection(null);
   }
 
   async function loadAvailability(catalog: CatalogAnime, group: "english" | "vietnamese") {
@@ -351,6 +475,9 @@ function App() {
 
   function mergeAnimeEverywhere(key: string, patch: Partial<Anime>) {
     setResults((items) =>
+      items.map((item) => (animeKey(item.provider, item.id) === key ? mergeAnimeDetails(item, patch) : item)),
+    );
+    setProviderResults((items) =>
       items.map((item) => (animeKey(item.provider, item.id) === key ? mergeAnimeDetails(item, patch) : item)),
     );
     setSearchSelection((anime) =>
@@ -553,6 +680,8 @@ function App() {
               key="search"
               query={query}
               results={catalogResults}
+              providerResults={providerResults}
+              catalogError={catalogSearchError}
               loading={loading}
               sources={sources}
               languageGroup={languageGroup}
@@ -563,7 +692,9 @@ function App() {
               onSearch={() => void searchCatalog()}
               onLanguageChange={setLanguageGroup}
               onProviderSelect={(option) => void selectCatalogProvider(option)}
-              onSelectCatalog={setCatalogSelection}
+              onProviderSourceSelect={selectProviderSource}
+              onSelectProviderResult={selectProviderResult}
+              onSelectCatalog={selectCatalogResult}
               onOpenAnime={(anime) => void openAnime(anime)}
               onToggleMyList={(anime) => void toggleMyList(anime)}
               onBack={goBack}
@@ -1101,6 +1232,8 @@ function CatalogPage({
 function SearchStage({
   query,
   results,
+  providerResults,
+  catalogError,
   loading,
   sources,
   languageGroup,
@@ -1111,6 +1244,8 @@ function SearchStage({
   onSearch,
   onLanguageChange,
   onProviderSelect,
+  onProviderSourceSelect,
+  onSelectProviderResult,
   onSelectCatalog,
   onOpenAnime,
   onToggleMyList,
@@ -1118,6 +1253,8 @@ function SearchStage({
 }: {
   query: string;
   results: CatalogAnime[];
+  providerResults: Anime[];
+  catalogError: AppError | null;
   loading: boolean;
   sources: Source[];
   languageGroup: "english" | "vietnamese";
@@ -1128,14 +1265,32 @@ function SearchStage({
   onSearch: () => void;
   onLanguageChange: (language: "english" | "vietnamese") => void;
   onProviderSelect: (option: ProviderAvailability) => void;
+  onProviderSourceSelect: (source: Source) => void;
+  onSelectProviderResult: (anime: Anime) => void;
   onSelectCatalog: (anime: CatalogAnime) => void;
   onOpenAnime: (anime: Anime) => void;
   onToggleMyList: (anime: Anime) => void;
   onBack: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const previewImage = selectedCatalog?.bannerUrl || selectedCatalog?.coverUrl || LOGO_SRC;
+  const previewImage =
+    selectedCatalog?.bannerUrl ||
+    selectedAnime?.bannerUrl ||
+    selectedCatalog?.coverUrl ||
+    selectedAnime?.coverUrl ||
+    LOGO_SRC;
   const languageSources = sources.filter((source) => source.languageGroup === languageGroup);
+  const previewTitle = selectedCatalog?.title ?? selectedAnime?.title ?? "";
+  const previewDescription = selectedCatalog?.description ?? selectedAnime?.synopsis ?? "";
+  const previewMeta = selectedCatalog
+    ? {
+        episodes: selectedCatalog.totalEpisodes,
+        category: selectedCatalog.genres.slice(0, 2).join(" / ") || selectedCatalog.format || "Uncategorized",
+      }
+    : {
+        episodes: selectedAnime?.totalEpisodes,
+        category: selectedAnime?.provider ?? "Provider result",
+      };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1177,18 +1332,19 @@ function SearchStage({
           <div className="availability-strip" aria-label="Available providers">
             {languageSources.map((source) => {
               const option = availability.find((item) => item.provider === source.name);
-              const enabled = source.status !== "unavailable" && option?.status === "available";
+              const hasDirectResult = providerResults.some((anime) => anime.provider === source.name);
+              const enabled = source.status !== "unavailable" && (option?.status === "available" || hasDirectResult);
               return (
                 <button
                   key={source.name}
                   className={selectedAnime?.provider === source.name ? "provider-chip active" : "provider-chip"}
                   disabled={!enabled}
                   title={source.failureCode || option?.failureCode || undefined}
-                  onClick={() => option && onProviderSelect(option)}
+                  onClick={() => (option?.status === "available" ? onProviderSelect(option) : onProviderSourceSelect(source))}
                 >
                   <i className={`health-dot ${source.status}`} />
                   <strong>{source.name}</strong>
-                  <span>{enabled ? "Ready" : source.failureCode === "PROVIDER_CAPTCHA" ? "Captcha" : "Unavailable"}</span>
+                  <span>{enabled ? (hasDirectResult && !option ? "Search" : "Ready") : source.failureCode === "PROVIDER_CAPTCHA" ? "Captcha" : "Unavailable"}</span>
                 </button>
               );
             })}
@@ -1200,9 +1356,42 @@ function SearchStage({
         <div className="search-layout">
           <aside className="search-results-pane">
             <div className="pane-title">
+              <span>Provider Results</span>
+              <strong>{providerResults.length}</strong>
+            </div>
+            {providerResults.map((anime, index) => {
+              const active = selectedAnime && !selectedCatalog && animeKey(selectedAnime.provider, selectedAnime.id) === animeKey(anime.provider, anime.id);
+              return (
+                <motion.button
+                  className={active ? "search-result active" : "search-result"}
+                  key={animeKey(anime.provider, anime.id)}
+                  onClick={() => onSelectProviderResult(anime)}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 380,
+                    damping: 30,
+                    delay: Math.min(index * 0.012, 0.12),
+                  }}
+                  whileHover={{ x: 2, y: -1 }}
+                >
+                  <img src={anime.coverUrl || LOGO_SRC} alt="" />
+                  <span>{anime.title}</span>
+                  <small>{anime.provider} / {anime.language}</small>
+                </motion.button>
+              );
+            })}
+            <div className="pane-title">
               <span>AniList Catalog</span>
               <strong>{results.length}</strong>
             </div>
+            {catalogError && (
+              <div className="inline-status">
+                <strong>{catalogError.code}</strong>
+                <span>{catalogError.message}</span>
+              </div>
+            )}
             {loading && !results.length ? (
               Array.from({ length: 9 }).map((_, index) => <div className="result-skeleton" key={index} />)
             ) : results.length ? (
@@ -1230,37 +1419,37 @@ function SearchStage({
                 );
               })
             ) : (
-              <EmptyPanel title={query.trim().length < 2 ? "ani-desk" : "No results"} compact />
+              !providerResults.length && <EmptyPanel title={query.trim().length < 2 ? "ani-desk" : "No results"} compact />
             )}
           </aside>
 
           <AnimatePresence mode="wait">
             <motion.div
               className="search-preview"
-              key={selectedCatalog?.catalogId ?? "empty"}
+              key={selectedCatalog?.catalogId ?? (selectedAnime ? animeKey(selectedAnime.provider, selectedAnime.id) : "empty")}
               initial={{ opacity: 0, scale: 0.985, x: 18 }}
               animate={{ opacity: 1, scale: 1, x: 0 }}
               exit={{ opacity: 0, scale: 0.99, x: -18 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
-              {selectedCatalog ? (
+              {selectedCatalog || selectedAnime ? (
                 <>
                   <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
-                  <img className="preview-poster-fallback" src={selectedCatalog.coverUrl || LOGO_SRC} alt="" />
+                  <img className="preview-poster-fallback" src={selectedCatalog?.coverUrl || selectedAnime?.coverUrl || LOGO_SRC} alt="" />
                   <div className="preview-copy">
                     <p className="eyebrow">{selectedAnime ? `${selectedAnime.provider} / ${selectedAnime.language}` : "Catalog title"}</p>
-                    <h1>{selectedCatalog.title}</h1>
-                    <p>{plainDescription(selectedCatalog.description) || "No synopsis is available for this title."}</p>
+                    <h1>{previewTitle}</h1>
+                    <p>{plainDescription(previewDescription) || "No synopsis is available for this title."}</p>
                     <div className="preview-meta">
-                      <span><Film size={16} /> {selectedCatalog.totalEpisodes ? `${selectedCatalog.totalEpisodes} episodes` : selectedCatalog.format || "Anime"}</span>
-                      <span><SlidersHorizontal size={16} /> {selectedCatalog.genres.slice(0, 2).join(" / ") || "Uncategorized"}</span>
+                      <span><Film size={16} /> {previewMeta.episodes ? `${previewMeta.episodes} episodes` : selectedCatalog?.format || "Title"}</span>
+                      <span><SlidersHorizontal size={16} /> {previewMeta.category}</span>
                     </div>
                     <div className="detail-actions">
                       <button className="primary" disabled={!selectedAnime} onClick={() => selectedAnime && onOpenAnime(selectedAnime)}>
                         <Play size={18} />
                         {selectedAnime ? "Open" : "Unavailable"}
                       </button>
-                      <button onClick={() => onToggleMyList(selectedAnime ?? catalogOnlyAnime(selectedCatalog))}>
+                      <button onClick={() => onToggleMyList(selectedAnime ?? catalogOnlyAnime(selectedCatalog!))}>
                         {(selectedAnime?.isFavorite ?? false) ? (
                           <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
                         ) : (

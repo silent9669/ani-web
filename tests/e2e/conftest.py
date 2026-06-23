@@ -86,6 +86,8 @@ def mocked_page(page, vite_server):
                     }
                 ],
                 search_error: null,
+                catalog_search_error: null,
+                provider_search_error: null,
                 playback_error: null,
                 update_available: false,
                 update_error: null,
@@ -173,6 +175,7 @@ def mocked_page(page, vite_server):
                     }))
                 };
             } else if (cmd === "search_catalog") {
+                if (state.catalog_search_error) throw state.catalog_search_error;
                 if (state.search_error) throw state.search_error;
                 if ((args.query || "").toLowerCase().includes("empty")) return [];
                 return Array.from({ length: 16 }, (_, index) => ({
@@ -250,6 +253,9 @@ def mocked_page(page, vite_server):
                     seasonYear: 2026
                 }));
             } else if (cmd === "search_source") {
+                if (state.provider_search_error) {
+                    throw new Error(state.provider_search_error);
+                }
                 if (state.search_error) {
                     throw new Error(state.search_error);
                 }
