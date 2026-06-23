@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - Unreleased
+### Added
+- Added AniList-backed Trending, seasonal, genre, and catalog search experiences.
+- Added cached provider health, manual retry, availability resolution, structured error codes, and correlation IDs.
+- Added AnimeGG and MovieBox English adapters plus AniMapper-backed AnimeVietSub for Vietnamese playback.
+- Added AniMapper adapters for its documented AnimeTVN and Niniyo identifiers behind disabled config flags until they pass certification.
+- Added a release-blocking live provider certification probe for search, episode listing, stream resolution, and playlist/media retrieval.
+- Added non-destructive catalog IDs to history and favorites for cross-provider matching.
+- Added a paginated catalog browser with genre, season/year, format, status, and personal-match sorting.
+- Added local personal-match scoring from saved-title and watch-progress genre affinity.
+
+### Changed
+- Removed provider controls from Home; language and provider selection now live in Search.
+- Reworked Search around one AniList result set with English and Vietnamese availability choices.
+- Made provider availability concurrent, cached, timeout-bounded, and protected from stale title/language responses.
+- Simplified the player chrome into unframed floating controls, bottom-edge progress, vertical volume, and compact quality/subtitle menus.
+- Changed Home to exactly Continue Watching, Trending Now, and My List; catalog posters now prefill Search.
+- Kept AllAnime visible as the default English source but unavailable when it reports `NEED_CAPTCHA`; HiAnime remains disabled until it passes live stream certification.
+- Tightened provider title matching so availability and certification reject unrelated playable search results.
+
+### Release Gate
+- v1.0.2 requires at least one certified English provider. Current local certification passes AnimeGG and MovieBox for English, KKPhim/OPhim for Vietnamese, reports AnimeVietSub as intermittent when AniMapper stream requests time out, and reports AllAnime as `PROVIDER_CAPTCHA`.
+
 ## [1.0.1] - 2026-06-14
 ### Added
 - Added signed Tauri updater support with in-app update prompt, download progress, install, and relaunch.

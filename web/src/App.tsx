@@ -1,13 +1,14 @@
 import Hls from "hls.js";
+import type { MediaPlayerClass, Representation } from "dashjs";
 import {
   ArrowLeft,
+  AlertTriangle,
   Check,
   ChevronRight,
   Clock,
+  Copy,
   Film,
   Loader2,
-  Maximize,
-  MonitorPlay,
   Pause,
   Play,
   Plus,
@@ -17,6 +18,7 @@ import {
   SlidersHorizontal,
   Star,
   Trash2,
+  X,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -25,7 +27,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { animeKey, api, favoriteToAnime } from "./api";
-import type { Anime, AnimeDetails, Episode, Favorite, PlayerContext, Source, WatchHistory } from "./types";
+import type {
+  Anime,
+  AnimeDetails,
+  AppError,
+  CatalogAnime,
+  CatalogFilters,
+  DiscoveryCatalog,
+  Episode,
+  Favorite,
+  PlayerContext,
+  ProviderAvailability,
+  Source,
+  WatchHistory,
+} from "./types";
 import {
   type AppUpdateState,
   checkForAppUpdate,
@@ -41,8 +56,8 @@ const fadeUpVariant = {
   show: { opacity: 1, y: 0 },
 };
 
-type Route = "home" | "my-list" | "continue" | "search" | "detail";
-type QualityLevel = { index: number; label: string };
+type Route = "home" | "my-list" | "continue" | "search" | "detail" | "catalog";
+type QualityLevel = { index: number; label: string; id?: string };
 type ShelfSort = "recent" | "title" | "provider";
 
 function App() {
@@ -50,6 +65,12 @@ function App() {
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Anime[]>([]);
+  const [catalogResults, setCatalogResults] = useState<CatalogAnime[]>([]);
+  const [catalogSelection, setCatalogSelection] = useState<CatalogAnime | null>(null);
+  const [availability, setAvailability] = useState<ProviderAvailability[]>([]);
+  const [languageGroup, setLanguageGroup] = useState<"english" | "vietnamese">("english");
+  const [discovery, setDiscovery] = useState<DiscoveryCatalog | null>(null);
+  const [myListCatalog, setMyListCatalog] = useState<CatalogAnime[]>([]);
   const [searchSelection, setSearchSelection] = useState<Anime | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<Anime | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -59,10 +80,13 @@ function App() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
   const [route, setRoute] = useState<Route>("home");
   const [routeStack, setRouteStack] = useState<Route[]>([]);
   const detailCacheRef = useRef<Record<string, Partial<Anime>>>({});
+  const availabilityCacheRef = useRef(new Map<string, { expiresAt: number; items: ProviderAvailability[] }>());
+  const availabilityGenerationRef = useRef(0);
+  const catalogSearchGenerationRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: "idle" });
 
@@ -89,30 +113,32 @@ function App() {
   useEffect(() => {
     if (route !== "search") return;
     const cleanQuery = query.trim();
+    setAvailability([]);
+    setSearchSelection(null);
+    setSelectedSource(null);
     if (cleanQuery.length < 2) {
-      setResults([]);
-      setSearchSelection(null);
+      setCatalogResults([]);
+      setCatalogSelection(null);
       return;
     }
 
-    const handle = window.setTimeout(() => {
-      void search(cleanQuery, selectedSource);
-    }, 320);
+    const handle = window.setTimeout(() => void searchCatalog(cleanQuery), 320);
 
     return () => window.clearTimeout(handle);
-  }, [query, route, selectedSource]);
+  }, [query, route]);
 
   useEffect(() => {
-    if (route !== "search" || !searchSelection) return;
-    void enrichAnime(searchSelection);
-  }, [route, searchSelection?.provider, searchSelection?.id]);
+    if (route !== "search" || !catalogSelection) return;
+    void loadAvailability(catalogSelection, languageGroup);
+  }, [route, catalogSelection?.catalogId, languageGroup]);
 
   async function bootstrap() {
     try {
-      const [sourceList, history, favorites] = await Promise.all([
+      const [sourceList, history, favorites, favoriteCatalog] = await Promise.all([
         api.listSources(),
         api.getContinueWatching(200),
         api.getMyList(300),
+        api.getMyListCatalog(30).catch(() => []),
       ]);
       const savedSourceName = loadSavedSourceName();
       const nextSource = sourceList.find((source) => source.name === savedSourceName) ?? sourceList[0] ?? null;
@@ -122,20 +148,30 @@ function App() {
       if (nextSource) saveSourceName(nextSource.name);
       setContinueWatching(history);
       setMyList(favorites);
+      setMyListCatalog(favoriteCatalog);
+      void api.listProviderHealth().then((health) => {
+        setSources(health);
+        setSelectedSource((current) => health.find((source) => source.name === current?.name) ?? health[0] ?? null);
+      }).catch((err) => setError(toAppError(err, "provider-health")));
+      void api.getDiscovery().then((catalog) => {
+        setDiscovery(catalog);
+      }).catch((err) => setError(toAppError(err, "catalog")));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "bootstrap"));
     } finally {
       setBootstrapping(false);
     }
   }
 
   async function refreshShelfData() {
-    const [history, favorites] = await Promise.all([
+    const [history, favorites, favoriteCatalog] = await Promise.all([
       api.getContinueWatching(200),
       api.getMyList(300),
+      api.getMyListCatalog(30).catch(() => []),
     ]);
     setContinueWatching(history);
     setMyList(favorites);
+    setMyListCatalog(favoriteCatalog);
   }
 
   async function checkAppUpdates() {
@@ -216,22 +252,18 @@ function App() {
   function selectSource(source: Source) {
     setSelectedSource(source);
     saveSourceName(source.name);
-    if (query.trim().length >= 2) void search(query, source);
   }
 
   function openSearch() {
     if (route !== "search") navigate("search");
   }
 
-  async function search(nextQuery = query, source = selectedSource) {
-    if (!source) {
-      setError("No sources are enabled. Check your ani-desk config.");
-      return;
-    }
-
+  async function searchCatalog(nextQuery = query) {
     const cleanQuery = nextQuery.trim();
+    const generation = ++catalogSearchGenerationRef.current;
     if (cleanQuery.length < 2) {
-      setResults([]);
+      setCatalogResults([]);
+      setCatalogSelection(null);
       setSearchSelection(null);
       return;
     }
@@ -239,19 +271,65 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const items = await api.searchSource(source.name, cleanQuery);
-      setResults(items);
-      setSearchSelection((current) => {
-        if (current && items.some((item) => animeKey(item.provider, item.id) === animeKey(current.provider, current.id))) {
+      const items = await api.searchCatalog(cleanQuery);
+      if (generation !== catalogSearchGenerationRef.current) return;
+      setCatalogResults(items);
+      setCatalogSelection((current) => {
+        if (current && items.some((item) => item.catalogId === current.catalogId)) {
           return current;
         }
         return items[0] ?? null;
       });
     } catch (err) {
-      setError(errorMessage(err));
+      if (generation !== catalogSearchGenerationRef.current) return;
+      setError(toAppError(err, "catalog-search"));
     } finally {
-      setLoading(false);
+      if (generation === catalogSearchGenerationRef.current) setLoading(false);
     }
+  }
+
+  async function loadAvailability(catalog: CatalogAnime, group: "english" | "vietnamese") {
+    const generation = ++availabilityGenerationRef.current;
+    const cacheKey = `${catalog.catalogId}:${group}`;
+    setAvailability([]);
+    setSearchSelection(null);
+    setSelectedSource(null);
+    setLoading(true);
+    setError(null);
+    try {
+      const cached = availabilityCacheRef.current.get(cacheKey);
+      const options = cached && cached.expiresAt > Date.now()
+        ? cached.items
+        : await api.resolveAvailability(catalog.catalogId, catalog.title, group);
+      if (generation !== availabilityGenerationRef.current) return;
+      availabilityCacheRef.current.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, items: options });
+      setAvailability(options);
+      const playable = options.find((item) => item.status === "available" && item.anime)?.anime ?? null;
+      setSearchSelection(playable ? catalogToAnime(catalog, playable) : null);
+      setSelectedSource(playable ? sources.find((source) => source.name === playable.provider) ?? null : null);
+    } catch (err) {
+      if (generation !== availabilityGenerationRef.current) return;
+      setAvailability([]);
+      setSearchSelection(null);
+      setError(toAppError(err, "availability"));
+    } finally {
+      if (generation === availabilityGenerationRef.current) setLoading(false);
+    }
+  }
+
+  async function selectCatalogProvider(option: ProviderAvailability) {
+    if (!catalogSelection || !option.anime) return;
+    setSelectedSource(sources.find((source) => source.name === option.provider) ?? null);
+    setSearchSelection(catalogToAnime(catalogSelection, option.anime));
+  }
+
+  function openCatalogSearch(catalog: CatalogAnime) {
+    setQuery(catalog.title);
+    setCatalogSelection(catalog);
+    setCatalogResults([catalog]);
+    setAvailability([]);
+    setSearchSelection(null);
+    if (route !== "search") navigate("search");
   }
 
   async function enrichAnime(anime: Anime): Promise<Anime> {
@@ -293,7 +371,7 @@ function App() {
     try {
       setEpisodes(await api.getEpisodes(anime.provider, anime.id));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "episodes"));
     } finally {
       setLoadingEpisodes(false);
     }
@@ -301,6 +379,23 @@ function App() {
 
   async function openHistoryItem(item: WatchHistory) {
     await openAnime(historyToAnime(item, myList));
+  }
+
+  async function openSavedAnime(anime: Anime) {
+    if (!anime.catalogId) {
+      setQuery(anime.title);
+      openSearch();
+      return;
+    }
+    openCatalogSearch({
+      catalogId: anime.catalogId,
+      title: anime.title,
+      coverUrl: anime.coverUrl,
+      bannerUrl: anime.bannerUrl,
+      description: anime.synopsis,
+      genres: [],
+      totalEpisodes: anime.totalEpisodes,
+    });
   }
 
   async function toggleMyList(anime: Anime) {
@@ -316,7 +411,7 @@ function App() {
         markFavorite(key, true);
       }
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "favorites"));
     }
   }
 
@@ -327,7 +422,7 @@ function App() {
       setMyList((items) => items.filter((item) => item.animeId !== key));
       markFavorite(key, false);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "favorites"));
     }
   }
 
@@ -336,7 +431,7 @@ function App() {
       await api.removeContinueWatching(item.animeId);
       setContinueWatching((items) => items.filter((current) => current.animeId !== item.animeId));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "history"));
     }
   }
 
@@ -360,7 +455,7 @@ function App() {
       const playback = await api.preparePlayback(anime.provider, episode.id);
       setPlayer({ anime, episode, episodes: episodeList, playback, startTime });
     } catch (err) {
-      setError(errorMessage(err));
+      setError(toAppError(err, "playback"));
     }
   }
 
@@ -391,7 +486,13 @@ function App() {
       />
 
       <main>
-        {error && <div className="error-banner">{error}</div>}
+        {error && (
+          <ErrorNotice
+            error={error}
+            onDismiss={() => setError(null)}
+            onRetry={error.retryable ? () => void bootstrap() : undefined}
+          />
+        )}
 
         <AnimatePresence mode="wait">
           {route === "home" && (
@@ -399,16 +500,14 @@ function App() {
               <HomeDashboard
                 query={query}
                 loading={loading}
-                sources={sources}
-                selectedSource={selectedSource}
                 onOpenSearch={openSearch}
-                continueItems={continueWatching.slice(0, 10)}
+                continueItems={continueWatching.slice(0, 8)}
                 continueTotal={continueWatching.length}
-                savedAnime={savedAnime.slice(0, 10)}
-                savedTotal={savedAnime.length}
-                onSourceSelect={selectSource}
+                discovery={discovery}
+                myListCatalog={myListCatalog}
+                onOpenCatalog={openCatalogSearch}
+                onShowCatalog={() => navigate("catalog")}
                 onResumeHistory={(item) => void openHistoryItem(item)}
-                onOpenAnime={(anime) => void openAnime(anime)}
                 onShowHistory={continueWatching.length ? () => navigate("continue") : undefined}
                 onShowMyList={() => navigate("my-list")}
                 myList={myList}
@@ -434,9 +533,18 @@ function App() {
             <MyListPage
               key="my-list"
               items={savedAnime}
-              onOpen={(anime) => void openAnime(anime)}
+              onOpen={(anime) => void openSavedAnime(anime)}
               onRemove={(anime) => void removeFromMyList(anime)}
               onBack={goBack}
+            />
+          )}
+
+          {route === "catalog" && (
+            <CatalogPage
+              key="catalog"
+              genres={discovery?.genres ?? []}
+              onBack={goBack}
+              onOpen={openCatalogSearch}
             />
           )}
 
@@ -444,15 +552,18 @@ function App() {
             <SearchStage
               key="search"
               query={query}
-              results={results}
+              results={catalogResults}
               loading={loading}
               sources={sources}
-              selectedSource={selectedSource}
+              languageGroup={languageGroup}
+              availability={availability}
+              selectedCatalog={catalogSelection}
               selectedAnime={searchSelection}
               onQueryChange={setQuery}
-              onSearch={() => void search()}
-              onSourceSelect={selectSource}
-              onSelectAnime={setSearchSelection}
+              onSearch={() => void searchCatalog()}
+              onLanguageChange={setLanguageGroup}
+              onProviderSelect={(option) => void selectCatalogProvider(option)}
+              onSelectCatalog={setCatalogSelection}
               onOpenAnime={(anime) => void openAnime(anime)}
               onToggleMyList={(anime) => void toggleMyList(anime)}
               onBack={goBack}
@@ -519,6 +630,48 @@ function BootSplash() {
   );
 }
 
+function ErrorNotice({
+  error,
+  onDismiss,
+  onRetry,
+}: {
+  error: AppError;
+  onDismiss: () => void;
+  onRetry?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <motion.aside
+      className="error-notice"
+      initial={{ opacity: 0, y: -12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      role="alert"
+    >
+      <AlertTriangle size={19} />
+      <div className="error-notice-copy">
+        <strong>{error.code}</strong>
+        <span>{error.message}</span>
+        {expanded && (
+          <dl>
+            <div><dt>Operation</dt><dd>{error.operation}</dd></div>
+            {error.provider && <div><dt>Provider</dt><dd>{error.provider}</dd></div>}
+            <div><dt>Correlation</dt><dd>{error.correlationId}</dd></div>
+            {error.technical && <div><dt>Details</dt><dd>{error.technical}</dd></div>}
+          </dl>
+        )}
+      </div>
+      <div className="error-notice-actions">
+        <button onClick={() => setExpanded((value) => !value)}>{expanded ? "Less" : "Details"}</button>
+        <IconButton label="Copy error details" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(error, null, 2))}>
+          <Copy size={17} />
+        </IconButton>
+        {onRetry && <button className="primary" onClick={onRetry}>Retry</button>}
+        <IconButton label="Dismiss error" onClick={onDismiss}><X size={17} /></IconButton>
+      </div>
+    </motion.aside>
+  );
+}
+
 function UpdatePrompt({
   state,
   onInstall,
@@ -578,16 +731,14 @@ function UpdatePrompt({
 function HomeDashboard({
   query,
   loading,
-  sources,
-  selectedSource,
   onOpenSearch,
   continueItems,
   continueTotal,
-  savedAnime,
-  savedTotal,
-  onSourceSelect,
+  discovery,
+  myListCatalog,
+  onOpenCatalog,
+  onShowCatalog,
   onResumeHistory,
-  onOpenAnime,
   onShowHistory,
   onShowMyList,
   myList,
@@ -596,18 +747,16 @@ function HomeDashboard({
 }: {
   query: string;
   loading: boolean;
-  sources: Source[];
-  selectedSource: Source | null;
   onOpenSearch: () => void;
   continueItems: WatchHistory[];
   continueTotal: number;
-  savedAnime: Anime[];
-  savedTotal: number;
-  onSourceSelect: (source: Source) => void;
+  discovery: DiscoveryCatalog | null;
+  myListCatalog: CatalogAnime[];
+  onOpenCatalog: (anime: CatalogAnime) => void;
+  onShowCatalog: () => void;
   onResumeHistory: (item: WatchHistory) => void;
-  onOpenAnime: (anime: Anime) => void;
   onShowHistory?: () => void;
-  onShowMyList?: () => void;
+  onShowMyList: () => void;
   myList: Favorite[];
   onToggleFavorite: (anime: Anime) => void;
   onRemoveHistory: (item: WatchHistory) => void;
@@ -632,7 +781,7 @@ function HomeDashboard({
           <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
           <div>
             <span>ani-desk</span>
-            <small>{selectedSource ? `${selectedSource.name} / ${selectedSource.language}` : "Pick a provider"}</small>
+            <small>Discover. Choose a source. Watch.</small>
           </div>
         </motion.div>
         <motion.div className="home-command-actions" variants={fadeUpVariant}>
@@ -641,7 +790,6 @@ function HomeDashboard({
             <span>{query.trim() || "Search anime, films, OVAs..."}</span>
             {loading ? <Loader2 className="spin" size={18} /> : <ChevronRight size={19} />}
           </motion.button>
-          <ProviderChips sources={sources} selected={selectedSource} onSelect={onSourceSelect} />
         </motion.div>
       </motion.div>
 
@@ -655,20 +803,67 @@ function HomeDashboard({
           onToggleFavorite={(item) => onToggleFavorite(historyToAnime(item, myList))}
           onRemove={onRemoveHistory}
         />
-        <AnimeRow
+        <CatalogRow
+          title="Trending Now"
+          items={discovery?.trending ?? []}
+          loading={!discovery}
+          onOpen={onOpenCatalog}
+          onShowMore={onShowCatalog}
+        />
+        <CatalogRow
           title="My List"
-          items={savedAnime}
-          total={savedTotal}
-          onOpen={onOpenAnime}
+          items={myListCatalog}
+          onOpen={onOpenCatalog}
           onShowMore={onShowMyList}
-          myList={myList}
-          onToggleFavorite={onToggleFavorite}
-          onRemove={onToggleFavorite}
           emptyTitle="Your list is empty"
           emptySubtitle="Search and add titles to keep them here."
         />
       </div>
     </section>
+  );
+}
+
+function CatalogRow({
+  title,
+  items,
+  loading,
+  onOpen,
+  controls,
+  onShowMore,
+  emptyTitle,
+  emptySubtitle,
+}: {
+  title: string;
+  items: CatalogAnime[];
+  loading?: boolean;
+  onOpen: (anime: CatalogAnime) => void;
+  controls?: ReactNode;
+  onShowMore?: () => void;
+  emptyTitle?: string;
+  emptySubtitle?: string;
+}) {
+  return (
+    <motion.section className="content-row catalog-row" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="row-heading"><h2>{title}</h2>{controls}{onShowMore && <button onClick={onShowMore}>Show More <ChevronRight size={17} /></button>}</div>
+      <div className={items.length || loading ? "card-row" : "card-row empty-row"}>
+        {loading
+          ? Array.from({ length: 9 }).map((_, index) => <div className="catalog-card skeleton" key={index} />)
+          : items.length ? items.map((anime, index) => (
+            <motion.button
+              className="catalog-card"
+              key={anime.catalogId}
+              onClick={() => onOpen(anime)}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.025, 0.15) }}
+            >
+              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+              <span>{anime.title}</span>
+              <small>{anime.personalMatch != null ? `${anime.personalMatch}% match` : anime.score ? `${anime.score}% score` : anime.format || "Anime"}</small>
+            </motion.button>
+          )) : <ShelfEmptyCard title={emptyTitle || "Nothing here yet"} subtitle={emptySubtitle || "Try another catalog filter."} />}
+      </div>
+    </motion.section>
   );
 }
 
@@ -813,37 +1008,134 @@ function RowHeading({ title, total, onShowMore }: { title: string; total?: numbe
   );
 }
 
+function CatalogPage({
+  genres,
+  onBack,
+  onOpen,
+}: {
+  genres: string[];
+  onBack: () => void;
+  onOpen: (anime: CatalogAnime) => void;
+}) {
+  const [filters, setFilters] = useState<CatalogFilters>({});
+  const [sort, setSort] = useState("personalMatch");
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<CatalogAnime[]>([]);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const currentYear = new Date().getFullYear();
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void api.getCatalog(filters, sort, page)
+      .then((result) => {
+        if (cancelled) return;
+        setItems(result.items);
+        setHasNextPage(result.hasNextPage);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [filters.genre, filters.season, filters.year, filters.format, filters.status, sort, page]);
+
+  function updateFilter<K extends keyof CatalogFilters>(key: K, value: CatalogFilters[K]) {
+    setPage(1);
+    setFilters((current) => ({ ...current, [key]: value || undefined }));
+  }
+
+  return (
+    <motion.section className="catalog-browser" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+      <header className="catalog-browser-header">
+        <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
+        <div><span>Discover</span><h1>Trending catalog</h1></div>
+        <select value={sort} onChange={(event) => { setPage(1); setSort(event.target.value); }} aria-label="Sort catalog">
+          <option value="personalMatch">Personal Match</option>
+          <option value="trending">Trending</option>
+          <option value="popularity">Popularity</option>
+          <option value="score">AniList Score</option>
+          <option value="newest">Newest</option>
+          <option value="title">Title</option>
+        </select>
+      </header>
+      <div className="catalog-filter-bar">
+        <select value={filters.genre || ""} onChange={(event) => updateFilter("genre", event.target.value)} aria-label="Genre">
+          <option value="">All genres</option>
+          {genres.map((genre) => <option value={genre} key={genre}>{genre}</option>)}
+        </select>
+        <select value={filters.season || ""} onChange={(event) => updateFilter("season", event.target.value)} aria-label="Season">
+          <option value="">All seasons</option><option value="WINTER">Winter</option><option value="SPRING">Spring</option><option value="SUMMER">Summer</option><option value="FALL">Fall</option>
+        </select>
+        <select value={filters.year || ""} onChange={(event) => updateFilter("year", event.target.value ? Number(event.target.value) : null)} aria-label="Year">
+          <option value="">All years</option>
+          {Array.from({ length: 15 }, (_, index) => currentYear - index).map((year) => <option value={year} key={year}>{year}</option>)}
+        </select>
+        <select value={filters.format || ""} onChange={(event) => updateFilter("format", event.target.value)} aria-label="Format">
+          <option value="">All formats</option><option value="TV">TV</option><option value="MOVIE">Movie</option><option value="OVA">OVA</option><option value="ONA">ONA</option><option value="TV_SHORT">Short</option>
+        </select>
+        <select value={filters.status || ""} onChange={(event) => updateFilter("status", event.target.value)} aria-label="Status">
+          <option value="">All statuses</option><option value="RELEASING">Releasing</option><option value="FINISHED">Finished</option><option value="NOT_YET_RELEASED">Upcoming</option>
+        </select>
+      </div>
+      <div className="catalog-grid" aria-busy={loading}>
+        {loading
+          ? Array.from({ length: 12 }, (_, index) => <div className="catalog-card skeleton" key={index} />)
+          : items.map((anime) => (
+            <button className="catalog-card" key={anime.catalogId} onClick={() => onOpen(anime)}>
+              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+              <span>{anime.title}</span>
+              <small>{anime.personalMatch != null ? `${anime.personalMatch}% match` : anime.score ? `${anime.score}% score` : anime.format || "Anime"}</small>
+            </button>
+          ))}
+      </div>
+      <footer className="catalog-pagination">
+        <button disabled={page === 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+        <span>Page {page}</span>
+        <button disabled={!hasNextPage || loading} onClick={() => setPage((value) => value + 1)}>Next</button>
+      </footer>
+    </motion.section>
+  );
+}
+
 function SearchStage({
   query,
   results,
   loading,
   sources,
-  selectedSource,
+  languageGroup,
+  availability,
+  selectedCatalog,
   selectedAnime,
   onQueryChange,
   onSearch,
-  onSourceSelect,
-  onSelectAnime,
+  onLanguageChange,
+  onProviderSelect,
+  onSelectCatalog,
   onOpenAnime,
   onToggleMyList,
   onBack,
 }: {
   query: string;
-  results: Anime[];
+  results: CatalogAnime[];
   loading: boolean;
   sources: Source[];
-  selectedSource: Source | null;
+  languageGroup: "english" | "vietnamese";
+  availability: ProviderAvailability[];
+  selectedCatalog: CatalogAnime | null;
   selectedAnime: Anime | null;
   onQueryChange: (query: string) => void;
   onSearch: () => void;
-  onSourceSelect: (source: Source) => void;
-  onSelectAnime: (anime: Anime) => void;
+  onLanguageChange: (language: "english" | "vietnamese") => void;
+  onProviderSelect: (option: ProviderAvailability) => void;
+  onSelectCatalog: (anime: CatalogAnime) => void;
   onOpenAnime: (anime: Anime) => void;
   onToggleMyList: (anime: Anime) => void;
   onBack: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const previewImage = selectedAnime?.bannerUrl || selectedAnime?.coverUrl || LOGO_SRC;
+  const previewImage = selectedCatalog?.bannerUrl || selectedCatalog?.coverUrl || LOGO_SRC;
+  const languageSources = sources.filter((source) => source.languageGroup === languageGroup);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -878,8 +1170,29 @@ function SearchStage({
           </motion.div>
         </div>
         <div className="search-source-row">
-          <span>Source</span>
-          <ProviderChips sources={sources} selected={selectedSource} onSelect={onSourceSelect} />
+          <div className="language-switch" aria-label="Subtitle language">
+            <button className={languageGroup === "english" ? "active" : ""} onClick={() => onLanguageChange("english")}>🇺🇸 English</button>
+            <button className={languageGroup === "vietnamese" ? "active" : ""} onClick={() => onLanguageChange("vietnamese")}>🇻🇳 Vietnamese</button>
+          </div>
+          <div className="availability-strip" aria-label="Available providers">
+            {languageSources.map((source) => {
+              const option = availability.find((item) => item.provider === source.name);
+              const enabled = source.status !== "unavailable" && option?.status === "available";
+              return (
+                <button
+                  key={source.name}
+                  className={selectedAnime?.provider === source.name ? "provider-chip active" : "provider-chip"}
+                  disabled={!enabled}
+                  title={source.failureCode || option?.failureCode || undefined}
+                  onClick={() => option && onProviderSelect(option)}
+                >
+                  <i className={`health-dot ${source.status}`} />
+                  <strong>{source.name}</strong>
+                  <span>{enabled ? "Ready" : source.failureCode === "PROVIDER_CAPTCHA" ? "Captcha" : "Unavailable"}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -887,19 +1200,19 @@ function SearchStage({
         <div className="search-layout">
           <aside className="search-results-pane">
             <div className="pane-title">
-              <span>{selectedSource?.name ?? "Source"}</span>
+              <span>AniList Catalog</span>
               <strong>{results.length}</strong>
             </div>
             {loading && !results.length ? (
               Array.from({ length: 9 }).map((_, index) => <div className="result-skeleton" key={index} />)
             ) : results.length ? (
               results.map((anime, index) => {
-                const active = selectedAnime && animeKey(anime.provider, anime.id) === animeKey(selectedAnime.provider, selectedAnime.id);
+                const active = selectedCatalog?.catalogId === anime.catalogId;
                 return (
                   <motion.button
                     className={active ? "search-result active" : "search-result"}
-                    key={`${anime.provider}:${anime.id}`}
-                    onClick={() => onSelectAnime(anime)}
+                    key={anime.catalogId}
+                    onClick={() => onSelectCatalog(anime)}
                     initial={{ opacity: 0, x: -12 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{
@@ -912,7 +1225,7 @@ function SearchStage({
                   >
                     <img src={anime.coverUrl || LOGO_SRC} alt="" />
                     <span>{anime.title}</span>
-                    <small>{anime.provider} / {anime.language}</small>
+                    <small>{[anime.format, anime.seasonYear].filter(Boolean).join(" / ") || "Anime"}</small>
                   </motion.button>
                 );
               })
@@ -924,36 +1237,36 @@ function SearchStage({
           <AnimatePresence mode="wait">
             <motion.div
               className="search-preview"
-              key={selectedAnime ? animeKey(selectedAnime.provider, selectedAnime.id) : "empty"}
+              key={selectedCatalog?.catalogId ?? "empty"}
               initial={{ opacity: 0, scale: 0.985, x: 18 }}
               animate={{ opacity: 1, scale: 1, x: 0 }}
               exit={{ opacity: 0, scale: 0.99, x: -18 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
-              {selectedAnime ? (
+              {selectedCatalog ? (
                 <>
                   <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
-                  <img className="preview-poster-fallback" src={selectedAnime.coverUrl || LOGO_SRC} alt="" />
+                  <img className="preview-poster-fallback" src={selectedCatalog.coverUrl || LOGO_SRC} alt="" />
                   <div className="preview-copy">
-                    <p className="eyebrow">{selectedAnime.provider} / {selectedAnime.language}</p>
-                    <h1>{selectedAnime.title}</h1>
-                    <p>{selectedAnime.synopsis || "Description is loaded from the selected provider when available."}</p>
+                    <p className="eyebrow">{selectedAnime ? `${selectedAnime.provider} / ${selectedAnime.language}` : "Catalog title"}</p>
+                    <h1>{selectedCatalog.title}</h1>
+                    <p>{plainDescription(selectedCatalog.description) || "No synopsis is available for this title."}</p>
                     <div className="preview-meta">
-                      <span><Film size={16} /> {selectedAnime.totalEpisodes ? `${selectedAnime.totalEpisodes} episodes` : "Episodes available"}</span>
-                      <span><SlidersHorizontal size={16} /> {selectedSource?.name ?? selectedAnime.provider}</span>
+                      <span><Film size={16} /> {selectedCatalog.totalEpisodes ? `${selectedCatalog.totalEpisodes} episodes` : selectedCatalog.format || "Anime"}</span>
+                      <span><SlidersHorizontal size={16} /> {selectedCatalog.genres.slice(0, 2).join(" / ") || "Uncategorized"}</span>
                     </div>
                     <div className="detail-actions">
-                      <button className="primary" onClick={() => onOpenAnime(selectedAnime)}>
+                      <button className="primary" disabled={!selectedAnime} onClick={() => selectedAnime && onOpenAnime(selectedAnime)}>
                         <Play size={18} />
-                        Open
+                        {selectedAnime ? "Open" : "Unavailable"}
                       </button>
-                      <button onClick={() => onToggleMyList(selectedAnime)}>
-                        {selectedAnime.isFavorite ? (
+                      <button onClick={() => onToggleMyList(selectedAnime ?? catalogOnlyAnime(selectedCatalog))}>
+                        {(selectedAnime?.isFavorite ?? false) ? (
                           <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
                         ) : (
                           <Star size={18} style={{ color: "var(--red)" }} />
                         )}
-                        {selectedAnime.isFavorite ? "In My List" : "My List"}
+                        {(selectedAnime?.isFavorite ?? false) ? "In My List" : "My List"}
                       </button>
                     </div>
                   </div>
@@ -1523,6 +1836,7 @@ function DetailPage({
 function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const dashRef = useRef<MediaPlayerClass | null>(null);
   const qualityRef = useRef("auto");
   const savingAtRef = useRef(0);
   const controlsTimerRef = useRef<number | null>(null);
@@ -1535,8 +1849,11 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [showVolume, setShowVolume] = useState(false);
   const streamIsHls = context.playback.streamKind === "hls" || context.playback.originalUrl.toLowerCase().includes(".m3u8");
+  const streamIsDash = context.playback.streamKind === "dash" || context.playback.originalUrl.toLowerCase().includes(".mpd");
   const subtitleTracks = context.playback.subtitles.filter((item) => item.url);
+  const [subtitle, setSubtitle] = useState(subtitleTracks.length ? "0" : "off");
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1553,6 +1870,8 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     qualityRef.current = "auto";
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    dashRef.current?.reset();
+    dashRef.current = null;
     video.removeAttribute("src");
     video.load();
 
@@ -1572,7 +1891,34 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
 
     video.addEventListener("error", handleNativeError);
 
-    if (streamIsHls) {
+    if (streamIsDash) {
+      void import("dashjs").then((dashjs) => {
+        if (disposed) return;
+        const player = dashjs.MediaPlayer().create();
+        dashRef.current = player;
+        player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+          if (disposed) return;
+          const representations = player.getRepresentationsByType("video");
+          setLevels(representations.map((representation, index) => ({
+            index,
+            id: representation.id,
+            label: formatDashRepresentation(representation, index),
+          })));
+          applyDashQuality(player, representations, qualityRef.current);
+          startPlayback();
+        });
+        player.on(dashjs.MediaPlayer.events.ERROR, (event) => {
+          if (disposed) return;
+          const message = "error" in event && event.error
+            ? ` (${String(event.error)})`
+            : "";
+          setError(`The browser player failed to load this DASH stream${message}. Try the fallback player.`);
+        });
+        player.initialize(video, context.playback.playbackUrl, false, context.startTime || undefined);
+      }).catch((loadError) => {
+        if (!disposed) setError(`The DASH player could not start (${String(loadError)}).`);
+      });
+    } else if (streamIsHls) {
       if (Hls.isSupported()) {
         const hls = new Hls({ capLevelToPlayerSize: true, enableWorker: true });
         hlsRef.current = hls;
@@ -1616,10 +1962,12 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
       video.removeEventListener("loadedmetadata", startPlayback);
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      dashRef.current?.reset();
+      dashRef.current = null;
       video.removeAttribute("src");
       video.load();
     };
-  }, [context.playback.playbackUrl, context.playback.originalUrl, context.playback.streamKind, context.startTime, streamIsHls]);
+  }, [context.playback.playbackUrl, context.playback.originalUrl, context.playback.streamKind, context.startTime, streamIsDash, streamIsHls]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1708,6 +2056,13 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     qualityRef.current = nextQuality;
     setQuality(nextQuality);
     applyHlsQuality(hlsRef.current, nextQuality);
+    if (dashRef.current) {
+      applyDashQuality(
+        dashRef.current,
+        dashRef.current.getRepresentationsByType("video"),
+        nextQuality,
+      );
+    }
   }
 
   async function saveProgress(force = false) {
@@ -1718,6 +2073,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     savingAtRef.current = now;
     await api.saveProgress({
       animeId: animeKey(context.anime.provider, context.anime.id),
+      catalogId: context.anime.catalogId ?? null,
       provider: context.anime.provider,
       title: context.anime.title,
       coverUrl: context.anime.coverUrl,
@@ -1766,6 +2122,15 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     video.muted = !video.muted;
   }
 
+  function changeSubtitle(value: string) {
+    setSubtitle(value);
+    const tracks = videoRef.current?.textTracks;
+    if (!tracks) return;
+    for (let index = 0; index < tracks.length; index += 1) {
+      tracks[index].mode = value === String(index) ? "showing" : "disabled";
+    }
+  }
+
   async function toggleFullscreen() {
     const root = videoRef.current?.parentElement;
     if (!root) return;
@@ -1798,6 +2163,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
         onTimeUpdate={() => void saveProgress()}
         onPause={() => void saveProgress(true)}
         onEnded={() => void saveProgress(true)}
+        onDoubleClick={() => void toggleFullscreen()}
       >
         {subtitleTracks.map((item, index) => (
           <track
@@ -1835,7 +2201,12 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
       </div>
 
       <div className="player-bottom">
-        {error && <span className="player-error">{error}</span>}
+        {error && (
+          <div className="player-error-fallback">
+            <span>{error}</span>
+            {context.playback.canFallbackToMpv && <button onClick={() => void openMpv()}>Open fallback player</button>}
+          </div>
+        )}
         <input
           className="player-progress"
           type="range"
@@ -1854,36 +2225,41 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
         />
         <div className="player-control-row">
           <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
-          <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>
-            {muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}
-          </button>
-          <input
-            className="volume-slider"
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={muted ? 0 : volume}
-            onChange={(event) => setVideoVolume(Number(event.target.value))}
-            aria-label="Volume"
-          />
+          <div className="player-volume-control" onMouseLeave={() => setShowVolume(false)}>
+            <button onClick={toggleMute} onMouseEnter={() => setShowVolume(true)} aria-label={muted ? "Unmute" : "Volume"}>
+              {muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}
+            </button>
+            {showVolume && (
+              <div className="player-volume-popover">
+                <input
+                  className="volume-slider"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  onChange={(event) => setVideoVolume(Number(event.target.value))}
+                  aria-label="Volume"
+                />
+              </div>
+            )}
+          </div>
           <label>
             Quality
-            <select value={quality} onChange={(event) => changeQuality(event.target.value)} disabled={!streamIsHls || !levels.length}>
+            <select value={quality} onChange={(event) => changeQuality(event.target.value)} disabled={(!streamIsHls && !streamIsDash) || !levels.length}>
               <option value="auto">Auto</option>
               {levels.map((level) => <option value={String(level.index)} key={level.index}>{level.label}</option>)}
             </select>
           </label>
-          {subtitleTracks.length > 0 && <span className="player-note">{subtitleTracks.length} subtitle track{subtitleTracks.length === 1 ? "" : "s"}</span>}
-          {context.playback.canFallbackToMpv && (
-            <button onClick={() => void openMpv()}>
-              <MonitorPlay size={18} />
-              mpv
-            </button>
+          {subtitleTracks.length > 0 && (
+            <label>
+              Subtitles
+              <select value={subtitle} onChange={(event) => changeSubtitle(event.target.value)}>
+                <option value="off">Off</option>
+                {subtitleTracks.map((track, index) => <option value={String(index)} key={track.url}>{track.language}</option>)}
+              </select>
+            </label>
           )}
-          <button onClick={() => void toggleFullscreen()} aria-label="Fullscreen">
-            <Maximize size={18} />
-          </button>
         </div>
       </div>
     </motion.div>
@@ -1920,6 +2296,7 @@ function historyToAnime(item: WatchHistory, myList: Favorite[]): Anime {
   return {
     id: item.animeId.includes(":") ? item.animeId.split(":").slice(1).join(":") : item.animeId,
     provider: item.provider,
+    catalogId: item.catalogId ?? null,
     title: item.title,
     coverUrl: item.coverUrl,
     bannerUrl: null,
@@ -1928,6 +2305,47 @@ function historyToAnime(item: WatchHistory, myList: Favorite[]): Anime {
     synopsis: null,
     isFavorite: myList.some((favorite) => favorite.animeId === item.animeId),
   };
+}
+
+function catalogToAnime(catalog: CatalogAnime, providerAnime: Anime): Anime {
+  return {
+    ...providerAnime,
+    catalogId: catalog.catalogId,
+    title: catalog.title || providerAnime.title,
+    coverUrl: catalog.coverUrl || providerAnime.coverUrl,
+    bannerUrl: catalog.bannerUrl || providerAnime.bannerUrl,
+    totalEpisodes: providerAnime.totalEpisodes ?? catalog.totalEpisodes,
+    synopsis: catalog.description || providerAnime.synopsis,
+  };
+}
+
+function catalogOnlyAnime(catalog: CatalogAnime): Anime {
+  return {
+    id: String(catalog.catalogId),
+    catalogId: catalog.catalogId,
+    provider: "Catalog",
+    title: catalog.title,
+    coverUrl: catalog.coverUrl,
+    bannerUrl: catalog.bannerUrl,
+    language: "Catalog",
+    totalEpisodes: catalog.totalEpisodes,
+    synopsis: catalog.description,
+    isFavorite: false,
+  };
+}
+
+function plainDescription(value?: string | null): string {
+  if (!value) return "";
+  const withBreaks = value.replace(/<br\s*\/?>/gi, "\n");
+  if (typeof DOMParser === "undefined") {
+    return withBreaks.replace(/<[^>]+>/g, "").replace(/&lt;br\s*\/??&gt;/gi, "\n").trim();
+  }
+  const document = new DOMParser().parseFromString(withBreaks, "text/html");
+  return (document.body.textContent || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function detailPatch(details: AnimeDetails): Partial<Anime> {
@@ -1986,6 +2404,28 @@ function applyHlsQuality(hls: Hls | null, quality: string) {
   if (Number.isInteger(level)) hls.currentLevel = level;
 }
 
+function formatDashRepresentation(representation: Representation, index: number) {
+  if (representation.height) return `${representation.height}p`;
+  if (representation.bitrateInKbit) return `${Math.round(representation.bitrateInKbit)} kbps`;
+  return `Quality ${index + 1}`;
+}
+
+function applyDashQuality(
+  player: MediaPlayerClass | null,
+  representations: Representation[],
+  quality: string,
+) {
+  if (!player) return;
+  if (quality === "auto") {
+    player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+    return;
+  }
+  const representation = representations[Number(quality)];
+  if (!representation) return;
+  player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+  player.setRepresentationForTypeById("video", representation.id, true);
+}
+
 function formatLevel(level: { height?: number; bitrate?: number; name?: string }, index: number) {
   if (level.height) return `${level.height}p`;
   if (level.name) return level.name;
@@ -2026,6 +2466,30 @@ function isTauriRuntime() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toAppError(error: unknown, operation: string): AppError {
+  if (error && typeof error === "object") {
+    const value = error as Partial<AppError>;
+    if (typeof value.code === "string" && typeof value.message === "string") {
+      return {
+        code: value.code,
+        message: value.message,
+        provider: value.provider ?? null,
+        operation: value.operation || operation,
+        retryable: Boolean(value.retryable),
+        correlationId: value.correlationId || crypto.randomUUID(),
+        technical: value.technical ?? null,
+      };
+    }
+  }
+  return {
+    code: "UNEXPECTED_ERROR",
+    message: errorMessage(error),
+    operation,
+    retryable: true,
+    correlationId: crypto.randomUUID(),
+  };
 }
 
 export default App;

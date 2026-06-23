@@ -8,11 +8,28 @@
 # Enable AllAnime source (English)
 allanime = true
 
+# Direct English hard-sub streams, including anime films.
+animegg = true
+
+# Signed English-sub series and film streams.
+moviebox = true
+
 # Enable KKPhim source (Vietnamese)
 kkphim = true
 
 # Enable OPhim source (Vietnamese)
 ophim = true
+
+# Enable AnimeVietSub through the AniMapper streaming API (Vietnamese)
+animevietsub = true
+
+# Additional documented AniMapper Vietnamese providers. Runtime health checks
+# disable them automatically when mapping or playback is unavailable.
+animetvn = false
+niniyo = false
+
+# Experimental English source. Disabled until direct playback certification passes.
+hianime = false
 
 [theme]
 primary_color = "#FF2934"

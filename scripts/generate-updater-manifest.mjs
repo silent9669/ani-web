@@ -6,7 +6,7 @@ const tag = process.argv[2];
 const outputDir = process.argv[3] ?? 'release-artifacts';
 
 if (!tag || !tag.startsWith('v')) {
-  console.error('Usage: node scripts/generate-updater-manifest.mjs v1.0.1 [release-artifacts]');
+  console.error('Usage: node scripts/generate-updater-manifest.mjs v1.0.2 [release-artifacts]');
   process.exit(1);
 }
 

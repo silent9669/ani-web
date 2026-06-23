@@ -3,19 +3,23 @@
 Local workspace: `/Users/phucdang/Documents/ani-desk`
 Remote target: `https://github.com/silent9669/ani-desk`
 
-## Current Phase: v1.0.1 Updater, Installer, And Chooser Polish (2026-06-14)
+## Current Phase: v1.0.2 Release Validation (2026-06-23)
+
+v1.0.2 is implemented locally and provider certification now has working English and Vietnamese playback paths. AllAnime still reports `NEED_CAPTCHA` from the upstream AllAnime/AllManga API and remains visible as the default English source, but it is health-gated with `PROVIDER_CAPTCHA` instead of being offered as playable while blocked. AnimeGG and MovieBox pass English playback certification. KKPhim and OPhim pass Vietnamese playback certification. AnimeVietSub is integrated but currently intermittent in live certification because AniMapper stream requests can time out. HiAnime, AnimeTVN, and Niniyo remain disabled by default until they pass the same live certification gate.
 
 ### Latest Changes (UI/UX Refinement Pass)
 
 1. **App Icon Regeneration** — All platform icons regenerate from the current `logo.png`; the icon pipeline also refreshes `web/public/logo.png` for in-app branding.
 
-2. **Command Center Home** — The old featured anime hero was removed. Home now uses a compact logo + `ani-desk` wordmark + animated search command bar + provider controls, followed by fixed Continue Watching and My List shelves.
+2. **Catalog Home** — Home now contains exactly Continue Watching, Trending Now, and My List beneath the compact logo/search command row. Provider controls appear only in Search.
 
-3. **Stable Shelves** — Continue Watching and My List always render on Home. Empty shelves use compact logo placeholders, and the Continue Watching progress bar now lives inside the thumbnail/banner area instead of overlapping episode text.
+3. **Provider-Independent Discovery** — AniList IDs back catalog records, discovery, and favorites while legacy provider-keyed history remains compatible.
 
-4. **Search & Episode UI/UX Polish** — Search keeps the fixed one-window layout with stronger command bar styling. Detail episodes now use a three-panel chooser: 50-episode range rail, active episode list, and vertical poster/details panel.
+4. **Availability Search** — Search queries AniList once, separates English and Vietnamese choices, resolves providers concurrently with bounded timeouts and stale-response protection, and keeps unavailable titles browsable and saveable.
 
-5. **Release Validation Prep** — The release workflow and Homebrew Cask packaging target Apple Silicon macOS 15+, Windows x64, and Linux x64 artifacts; the local tap checkout is expected at `/Users/phucdang/Documents/homebrew-ani-desk` when deployment validation begins.
+5. **Typed Diagnostics** — Provider and player failures use stable error codes, retryability, correlation IDs, redacted diagnostics, Copy, and Retry actions.
+
+6. **Release Certification** — Release CI probes provider search, episodes, stream resolution, and playlist/media retrieval. Publishing is allowed only when at least one English provider passes; the current local gate passes AnimeGG and MovieBox.
 
 6. **v1.0.1 Enhancements**:
    - **Signed Tauri Updater**: The desktop app checks signed GitHub release metadata, prompts users, downloads the updater artifact, installs it, and relaunches.
@@ -36,16 +40,22 @@ The 2026-06-13 UI/UX pass implemented the compact Netflix-style Home/Search/deta
 - Search uses an animated shared search-shell transition, one active provider, independent result scrolling, and enriched preview metadata.
 - Anime detail/episode browsing is now a dedicated `detail` route with Back navigation, internal episode scrolling, a range rail, search, sort, jump/highlight, resume/latest/first actions, and thumbnail-aware dense episode rows.
 - macOS keeps native traffic-light controls with a transparent titlebar foundation and platform-scoped glass CSS; full private-API transparent-window vibrancy remains deferred.
-- E2E mocks were updated to current providers: AllAnime, KKPhim, and OPhim.
+- E2E mocks cover the current catalog/search/provider flow, including disabled AllAnime, certified English fallbacks, and Vietnamese providers.
 
-## What Works Now (v1.0 baseline)
+## What Works Now (v1.0.2 candidate)
 
 - Tauri v2 + React + TypeScript frontend builds and runs
 - Rust core/provider/database code builds and tests pass
 - Built-in HLS/MP4 playback proxy works
-- 3 providers: AllAnime, KKPhim, OPhim
-- Dashboard command center with logo/search/provider controls, vertical Continue Watching cards, and always-visible centered My List shelf
-- Dual-pane animated search with fixed viewport layout and red accent borders
+- AniList catalog discovery and search
+- English playback through certified AnimeGG and MovieBox adapters
+- Vietnamese playback through certified KKPhim and OPhim adapters, with AnimeVietSub available as an intermittent AniMapper-backed source
+- AllAnime CAPTCHA detection and explicit unavailable status; uncertified HiAnime remains disabled
+- Dashboard command center with exactly Continue Watching, Trending Now, and My List shelves
+- Paginated catalog browser with genre, season/year, format, status, and sort controls
+- Local personal-match scoring from My List and watch-progress genre affinity
+- Dual-pane search with language selection and title-specific provider availability
+- Structured compact diagnostics with stable error codes
 - Detail route with scalable three-panel range rail + active episode list + poster/details panel
 - Signed Tauri updater metadata and in-app update prompt for v1.0.1+
 - Homebrew Cask metadata, real Tauri bundle release workflow, and platform install helpers exist for Apple Silicon macOS 15+, Windows, and Linux
@@ -57,8 +67,11 @@ npm run build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo audit
+npm audit --audit-level=high
 npm run check:icons
-npm run check:release-version -- v1.0.1
+npm run check:release-version -- v1.0.2
+cargo run --example provider_certification -- --require-english
 npm run tauri -- build --debug --no-bundle
 TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \

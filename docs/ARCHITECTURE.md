@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ani-desk` is a Tauri v2 desktop app — a Netflix-clone for watching anime from 3 providers (AllAnime, KKPhim, OPhim). It runs locally with no server dependency.
+`ani-desk` is a Tauri v2 desktop app with AniList catalog discovery and health-gated playback providers. It runs locally with no ani-desk application server.
 
 ## Stack
 
@@ -11,7 +11,7 @@
 | Frontend | React + TypeScript + Vite | `web/` |
 | Animations | `framer-motion` | `web/src/App.tsx` |
 | Icons | `lucide-react` | `web/src/App.tsx` |
-| Video | `hls.js` (HLS streams), native `<video>` (MP4) | `web/src/App.tsx` |
+| Video | `hls.js` (HLS), `dashjs` (DASH), native `<video>` (MP4) | `web/src/App.tsx` |
 | Backend | Rust (Tauri v2) | `src-tauri/` |
 | Core Library | `ani-desk-core` (providers, config, SQLite DB) | `src/` |
 | Desktop Shell | Tauri v2 IPC bridge | `src-tauri/src/main.rs` |
@@ -35,7 +35,7 @@ src/                 # Rust core library (ani-desk-core)
 ├── error.rs
 ├── player.rs        # Axum playback proxy, mpv fallback
 ├── update.rs        # Legacy version/install metadata helpers
-├── providers/       # AllAnime, KKPhim, OPhim scraper implementations
+├── providers/       # AllAnime, AnimeGG, MovieBox, KKPhim, OPhim, AnimeVietSub, and gated adapters
 ├── metadata/        # Anime metadata resolution
 ├── image/           # Image handling
 └── bin/             # CLI binary entry point
@@ -58,6 +58,12 @@ packaging/
 | Command | Returns | Description |
 |---------|---------|-------------|
 | `list_sources()` | `Source[]` | Enabled anime providers |
+| `get_discovery()` | `DiscoveryCatalog` | AniList trending and seasonal rails |
+| `get_genre_catalog(genre)` | `CatalogAnime[]` | AniList genre rail |
+| `search_catalog(query)` | `CatalogAnime[]` | Provider-independent AniList search |
+| `resolve_availability(catalogId, title, language?)` | `ProviderAvailability[]` | Match a catalog title to enabled providers |
+| `list_provider_health()` | `Source[]` | Cached provider capabilities and health |
+| `retry_provider_health()` | `Source[]` | Refresh provider health checks |
 | `get_continue_watching(limit)` | `WatchHistory[]` | Watch history |
 | `get_my_list(limit)` | `Favorite[]` | Favorited anime |
 | `search_source(source, query)` | `Anime[]` | Search a provider |
@@ -88,9 +94,10 @@ Plus overlays:
 - **Single-file route surface**: Most UI components still live in `App.tsx` so route state, playback state, and motion transitions remain easy to follow.
 - **CSS variables theme**: Dark theme defined in `:root` in `styles.css`. No CSS framework.
 - **framer-motion**: Used for page transitions, card hover, shared search transition, and player enter/exit.
-- **Provider chips**: Users can switch between 3 providers near the search bar.
+- **Availability controls**: Search separates English and Vietnamese choices and enables only providers that can play the selected title.
 - **Episode ranges**: For long-running shows (500+ episodes), episodes are chunked into ranges of 50.
-- **Playback proxy**: Axum binds to 127.0.0.1, rewrites HLS playlists so provider headers are applied safely.
+- **Playback proxy**: Axum binds to 127.0.0.1, rewrites HLS/DASH manifests so provider headers are applied safely.
+- **Provider certification**: AllAnime remains visible/default but can be health-gated as `PROVIDER_CAPTCHA`; AnimeGG and MovieBox are certified English fallbacks, KKPhim/OPhim are certified Vietnamese providers, and AnimeVietSub is integrated as an intermittent AniMapper-backed source for v1.0.2.
 - **Signed updates**: Tauri updater checks GitHub `latest.json`, prompts in-app, installs signed updater artifacts, and relaunches.
 
 ## Verification Commands
@@ -98,11 +105,12 @@ Plus overlays:
 ```bash
 npm run build
 npm run check:icons
-npm run check:release-version -- v1.0.1
+npm run check:release-version -- v1.0.2
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo audit
+cargo run --example provider_certification -- --require-english
 pytest tests/e2e
 npm run tauri -- build --debug --no-bundle
 TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \

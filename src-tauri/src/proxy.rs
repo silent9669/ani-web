@@ -5,6 +5,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header as axum_header, HeaderMap, HeaderName, HeaderValue, Response, StatusCode};
 use axum::routing::get;
 use axum::Router;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use reqwest::{header as reqwest_header, Client};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -58,6 +60,7 @@ impl ProxyState {
         let app = Router::new()
             .route("/play/:session_id", get(play_session))
             .route("/resource/:session_id", get(play_resource))
+            .route("/dash/:session_id/*path", get(play_dash_resource))
             .layer(
                 CorsLayer::new()
                     .allow_origin(Any)
@@ -129,6 +132,42 @@ async fn play_resource(
     proxy_url(&state, &session_id, &session, &query.url, &incoming_headers).await
 }
 
+async fn play_dash_resource(
+    State(state): State<ProxyState>,
+    Path((session_id, path)): Path<(String, String)>,
+    incoming_headers: HeaderMap,
+) -> Response<Body> {
+    let Some(session) = state.sessions.read().await.get(&session_id).cloned() else {
+        return text_response(StatusCode::NOT_FOUND, "Playback session not found");
+    };
+    let Some((encoded_base, relative_path)) = path
+        .strip_prefix("base/")
+        .and_then(|value| value.split_once('/').or(Some((value, ""))))
+    else {
+        return text_response(StatusCode::BAD_REQUEST, "Invalid DASH resource path");
+    };
+    let Ok(base_bytes) = URL_SAFE_NO_PAD.decode(encoded_base) else {
+        return text_response(StatusCode::BAD_REQUEST, "Invalid DASH resource base");
+    };
+    let Ok(base_url) = String::from_utf8(base_bytes) else {
+        return text_response(StatusCode::BAD_REQUEST, "Invalid DASH resource encoding");
+    };
+    let Ok(base) = Url::parse(&base_url) else {
+        return text_response(StatusCode::BAD_REQUEST, "Invalid DASH upstream URL");
+    };
+    let upstream = if relative_path.is_empty() {
+        base.to_string()
+    } else {
+        match base.join(relative_path) {
+            Ok(url) => url.to_string(),
+            Err(_) => {
+                return text_response(StatusCode::BAD_REQUEST, "Invalid DASH relative URL");
+            }
+        }
+    };
+    proxy_url(&state, &session_id, &session, &upstream, &incoming_headers).await
+}
+
 async fn proxy_url(
     state: &ProxyState,
     session_id: &str,
@@ -187,6 +226,25 @@ async fn proxy_url(
         return response_with_body(
             status,
             "application/vnd.apple.mpegurl; charset=utf-8",
+            Body::from(rewritten),
+        );
+    }
+
+    if is_dash_manifest(url, &content_type) {
+        let bytes = match response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return text_response(
+                    StatusCode::BAD_GATEWAY,
+                    &format!("Failed to read upstream DASH manifest: {}", error),
+                );
+            }
+        };
+        let manifest = String::from_utf8_lossy(&bytes);
+        let rewritten = rewrite_dash_manifest(&state.base_url, session_id, url, &manifest);
+        return response_with_body(
+            status,
+            "application/dash+xml; charset=utf-8",
             Body::from(rewritten),
         );
     }
@@ -259,6 +317,69 @@ fn is_hls_playlist(url: &str, content_type: &str) -> bool {
     url.to_ascii_lowercase().contains(".m3u8")
         || content_type.contains("mpegurl")
         || content_type.contains("application/vnd.apple")
+}
+
+fn is_dash_manifest(url: &str, content_type: &str) -> bool {
+    let content_type = content_type.to_ascii_lowercase();
+    url.to_ascii_lowercase().contains(".mpd") || content_type.contains("dash+xml")
+}
+
+fn rewrite_dash_manifest(
+    proxy_base_url: &str,
+    session_id: &str,
+    manifest_url: &str,
+    manifest: &str,
+) -> String {
+    let Ok(manifest_base) = Url::parse(manifest_url) else {
+        return manifest.to_string();
+    };
+    let mut output = String::with_capacity(manifest.len() + 128);
+    let mut remaining = manifest;
+    let mut found_base = false;
+    while let Some(start) = remaining.find("<BaseURL") {
+        let Some(open_end_relative) = remaining[start..].find('>') else {
+            break;
+        };
+        let open_end = start + open_end_relative + 1;
+        let Some(close_relative) = remaining[open_end..].find("</BaseURL>") else {
+            break;
+        };
+        let close = open_end + close_relative;
+        output.push_str(&remaining[..open_end]);
+        let original = remaining[open_end..close].trim();
+        let absolute = manifest_base
+            .join(original)
+            .unwrap_or_else(|_| manifest_base.clone());
+        output.push_str(&dash_proxy_base(proxy_base_url, session_id, &absolute));
+        output.push_str("</BaseURL>");
+        remaining = &remaining[close + "</BaseURL>".len()..];
+        found_base = true;
+    }
+    output.push_str(remaining);
+
+    if found_base {
+        return output;
+    }
+    let mut rewritten = output;
+    if let Some(mpd_start) = rewritten.find("<MPD") {
+        if let Some(relative_end) = rewritten[mpd_start..].find('>') {
+            let insert_at = mpd_start + relative_end + 1;
+            let parent = manifest_base.join(".").unwrap_or(manifest_base);
+            rewritten.insert_str(
+                insert_at,
+                &format!(
+                    "<BaseURL>{}</BaseURL>",
+                    dash_proxy_base(proxy_base_url, session_id, &parent)
+                ),
+            );
+        }
+    }
+    rewritten
+}
+
+fn dash_proxy_base(proxy_base_url: &str, session_id: &str, upstream_base: &Url) -> String {
+    let encoded = URL_SAFE_NO_PAD.encode(upstream_base.as_str());
+    format!("{proxy_base_url}/dash/{session_id}/base/{encoded}/")
 }
 
 fn response_with_body(status: StatusCode, content_type: &str, body: Body) -> Response<Body> {
@@ -354,5 +475,27 @@ mod tests {
             "https://example.com/video.mp4",
             "video/mp4"
         ));
+    }
+
+    #[test]
+    fn rewrites_dash_base_urls_and_adds_a_default_base() {
+        let manifest =
+            r#"<?xml version="1.0"?><MPD><Period><BaseURL>video/</BaseURL></Period></MPD>"#;
+        let rewritten = rewrite_dash_manifest(
+            "http://127.0.0.1:1234",
+            "session-id",
+            "https://cdn.example.com/show/index.mpd",
+            manifest,
+        );
+        assert!(rewritten.contains("http://127.0.0.1:1234/dash/session-id/base/"));
+        assert!(!rewritten.contains(">video/</BaseURL>"));
+
+        let without_base = rewrite_dash_manifest(
+            "http://127.0.0.1:1234",
+            "session-id",
+            "https://cdn.example.com/show/index.mpd",
+            "<MPD><Period /></MPD>",
+        );
+        assert!(without_base.contains("<MPD><BaseURL>http://127.0.0.1:1234/dash/session-id/base/"));
     }
 }

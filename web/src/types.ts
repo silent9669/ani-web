@@ -1,10 +1,80 @@
 export type Source = {
   name: string;
   language: string;
+  languageGroup: "english" | "vietnamese" | string;
+  status: "healthy" | "degraded" | "unavailable" | "unknown" | string;
+  failureCode?: string | null;
+  capabilities: ProviderCapabilities;
+};
+
+export type ProviderCapabilities = {
+  search: boolean;
+  details: boolean;
+  episodes: boolean;
+  playback: boolean;
+  subtitles: boolean;
+};
+
+export type CatalogAnime = {
+  catalogId: number;
+  title: string;
+  nativeTitle?: string | null;
+  description?: string | null;
+  coverUrl: string;
+  bannerUrl?: string | null;
+  genres: string[];
+  totalEpisodes?: number | null;
+  score?: number | null;
+  format?: string | null;
+  seasonYear?: number | null;
+  season?: string | null;
+  status?: string | null;
+  popularity?: number | null;
+  trending?: number | null;
+  personalMatch?: number | null;
+};
+
+export type CatalogFilters = {
+  genre?: string | null;
+  season?: string | null;
+  year?: number | null;
+  format?: string | null;
+  status?: string | null;
+};
+
+export type CatalogPage = {
+  items: CatalogAnime[];
+  page: number;
+  hasNextPage: boolean;
+};
+
+export type DiscoveryCatalog = {
+  trending: CatalogAnime[];
+  popularThisSeason: CatalogAnime[];
+  genres: string[];
+};
+
+export type ProviderAvailability = {
+  provider: string;
+  language: string;
+  status: "available" | "unavailable" | string;
+  failureCode?: string | null;
+  anime?: Anime | null;
+};
+
+export type AppError = {
+  code: string;
+  message: string;
+  provider?: string | null;
+  operation: string;
+  retryable: boolean;
+  correlationId: string;
+  technical?: string | null;
 };
 
 export type Anime = {
   id: string;
+  catalogId?: number | null;
   provider: string;
   title: string;
   coverUrl: string;
@@ -31,6 +101,7 @@ export type Episode = {
 
 export type WatchHistory = {
   animeId: string;
+  catalogId?: number | null;
   provider: string;
   title: string;
   coverUrl: string;
@@ -43,6 +114,7 @@ export type WatchHistory = {
 
 export type Favorite = {
   animeId: string;
+  catalogId?: number | null;
   provider: string;
   title: string;
   coverUrl: string;

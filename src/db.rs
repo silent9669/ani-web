@@ -13,6 +13,7 @@ pub struct Database {
 #[derive(Debug, Clone)]
 pub struct WatchHistory {
     pub anime_id: String,
+    pub catalog_id: Option<i64>,
     pub provider: String,
     pub title: String,
     pub cover_url: String,
@@ -78,6 +79,7 @@ impl Database {
             )",
             [],
         )?;
+        Self::ensure_column(&conn, "watch_history", "catalog_id", "INTEGER")?;
 
         // Image cache table
         conn.execute(
@@ -89,7 +91,6 @@ impl Database {
             )",
             [],
         )?;
-
         // Metadata cache table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS metadata_cache (
@@ -118,6 +119,7 @@ impl Database {
             )",
             [],
         )?;
+        Self::ensure_column(&conn, "favorites", "catalog_id", "INTEGER")?;
 
         // Update info table
         conn.execute(
@@ -151,11 +153,12 @@ impl Database {
 
         conn.execute(
             "INSERT OR REPLACE INTO watch_history
-             (anime_id, provider, title, cover_url, episode_number, episode_title,
+             (anime_id, catalog_id, provider, title, cover_url, episode_number, episode_title,
               position_seconds, total_seconds, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 history.anime_id,
+                history.catalog_id,
                 history.provider,
                 history.title,
                 history.cover_url,
@@ -174,7 +177,7 @@ impl Database {
         let conn = self.conn.lock().await;
 
         let mut stmt = conn.prepare(
-            "SELECT anime_id, provider, title, cover_url, episode_number, episode_title,
+            "SELECT anime_id, catalog_id, provider, title, cover_url, episode_number, episode_title,
                     position_seconds, total_seconds, updated_at
              FROM watch_history WHERE anime_id = ?1",
         )?;
@@ -183,15 +186,16 @@ impl Database {
             .query_row([anime_id], |row| {
                 Ok(WatchHistory {
                     anime_id: row.get(0)?,
-                    provider: row.get(1)?,
-                    title: row.get(2)?,
-                    cover_url: row.get(3)?,
-                    episode_number: row.get(4)?,
-                    episode_title: row.get(5)?,
-                    position_seconds: row.get(6)?,
-                    total_seconds: row.get(7)?,
+                    catalog_id: row.get(1)?,
+                    provider: row.get(2)?,
+                    title: row.get(3)?,
+                    cover_url: row.get(4)?,
+                    episode_number: row.get(5)?,
+                    episode_title: row.get(6)?,
+                    position_seconds: row.get(7)?,
+                    total_seconds: row.get(8)?,
                     updated_at: row
-                        .get::<_, String>(8)?
+                        .get::<_, String>(9)?
                         .parse()
                         .unwrap_or_else(|_| Utc::now()),
                 })
@@ -205,7 +209,7 @@ impl Database {
         let conn = self.conn.lock().await;
 
         let mut stmt = conn.prepare(
-            "SELECT anime_id, provider, title, cover_url, episode_number, episode_title,
+            "SELECT anime_id, catalog_id, provider, title, cover_url, episode_number, episode_title,
                     position_seconds, total_seconds, updated_at
              FROM watch_history
              ORDER BY updated_at DESC
@@ -216,15 +220,16 @@ impl Database {
             .query_map([limit], |row| {
                 Ok(WatchHistory {
                     anime_id: row.get(0)?,
-                    provider: row.get(1)?,
-                    title: row.get(2)?,
-                    cover_url: row.get(3)?,
-                    episode_number: row.get(4)?,
-                    episode_title: row.get(5)?,
-                    position_seconds: row.get(6)?,
-                    total_seconds: row.get(7)?,
+                    catalog_id: row.get(1)?,
+                    provider: row.get(2)?,
+                    title: row.get(3)?,
+                    cover_url: row.get(4)?,
+                    episode_number: row.get(5)?,
+                    episode_title: row.get(6)?,
+                    position_seconds: row.get(7)?,
+                    total_seconds: row.get(8)?,
                     updated_at: row
-                        .get::<_, String>(8)?
+                        .get::<_, String>(9)?
                         .parse()
                         .unwrap_or_else(|_| Utc::now()),
                 })
@@ -242,6 +247,15 @@ impl Database {
             params![anime_id],
         )?;
 
+        Ok(())
+    }
+
+    pub async fn update_history_catalog_id(&self, anime_id: &str, catalog_id: i64) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE watch_history SET catalog_id = ?1 WHERE anime_id = ?2 AND catalog_id IS NULL",
+            params![catalog_id, anime_id],
+        )?;
         Ok(())
     }
 
@@ -375,6 +389,7 @@ impl Database {
     pub async fn save_favorite(
         &self,
         anime_id: &str,
+        catalog_id: Option<i64>,
         provider: &str,
         title: &str,
         cover_url: &str,
@@ -383,10 +398,11 @@ impl Database {
 
         conn.execute(
             "INSERT OR REPLACE INTO favorites
-             (anime_id, provider, title, cover_url, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+             (anime_id, catalog_id, provider, title, cover_url, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 anime_id,
+                catalog_id,
                 provider,
                 title,
                 cover_url,
@@ -423,23 +439,38 @@ impl Database {
     pub async fn get_favorites(
         &self,
         limit: usize,
-    ) -> Result<Vec<(String, String, String, String)>> {
+    ) -> Result<Vec<(String, Option<i64>, String, String, String)>> {
         let conn = self.conn.lock().await;
 
         let mut stmt = conn.prepare(
-            "SELECT anime_id, provider, title, cover_url
+            "SELECT anime_id, catalog_id, provider, title, cover_url
              FROM favorites
              ORDER BY added_at DESC
              LIMIT ?1",
         )?;
 
-        let favorites: Vec<(String, String, String, String)> = stmt
+        let favorites: Vec<(String, Option<i64>, String, String, String)> = stmt
             .query_map([limit], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
             .collect::<Result<_, _>>()?;
 
         Ok(favorites)
+    }
+
+    pub async fn update_favorite_catalog_id(&self, anime_id: &str, catalog_id: i64) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE favorites SET catalog_id = ?1 WHERE anime_id = ?2 AND catalog_id IS NULL",
+            params![catalog_id, anime_id],
+        )?;
+        Ok(())
     }
 
     pub async fn save_update_info(&self, version: &str, show_notification: bool) -> Result<()> {
@@ -553,4 +584,41 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_id_columns_migrate_without_replacing_existing_rows() {
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute(
+            "CREATE TABLE watch_history (anime_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE favorites (anime_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO watch_history (anime_id, title) VALUES ('legacy', 'Legacy Anime')",
+            [],
+        )
+        .unwrap();
+
+        Database::ensure_column(&conn, "watch_history", "catalog_id", "INTEGER").unwrap();
+        Database::ensure_column(&conn, "favorites", "catalog_id", "INTEGER").unwrap();
+
+        let row: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT title, catalog_id FROM watch_history WHERE anime_id = 'legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("Legacy Anime".into(), None));
+    }
 }

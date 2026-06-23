@@ -4,7 +4,7 @@
 
 Redesign `ani-desk` from its current functional UI into a premium, animated Netflix-clone experience — simple layout, powerful lightweight animations, with macOS 26 Liquid Glass support.
 
-## Status: R1-R4 Implemented, v1.0.1 Release Polish Added
+## Status: R1-R4 Implemented, v1.0.2 Catalog And Provider Pass In Validation
 
 The previous agent session completed:
 - [x] Codebase analysis and architecture mapping
@@ -14,6 +14,9 @@ The previous agent session completed:
 - [x] **Episode Selection Page** — three-panel detail route with range rail, active episode list, poster/details, search, sort, jump, resume/latest/first
 - [x] **Signed updater foundation** — in-app update prompt plus signed Tauri updater metadata for v1.0.1+
 - [x] **macOS DMG polish** — dark/red drag-to-Applications background and `xattr -cr /Applications/ani-desk.app` unsigned-app guidance
+- [x] **AniList catalog Home/Search** — provider-independent discovery with language and availability selection in Search
+- [x] **Provider health and typed errors** — cached health, retry, stable codes, redacted diagnostics, and correlation IDs
+- [x] **English playback certification** — AllAnime is CAPTCHA-gated, but AnimeGG and MovieBox pass live playback certification
 - [ ] **Cross-platform release validation** — Windows/Linux bundles and tap brewbot run in GitHub release workflow
 
 ---
@@ -21,13 +24,13 @@ The previous agent session completed:
 ## R1. Dashboard Refinement
 
 **Current state**: `HomeDashboard` component (App.tsx L445-555) already has:
-- Compact command center with `logo.png`, wordmark, animated search trigger, and provider controls
-- Provider chips
-- Continue Watching row + always-visible My List row
+- Compact command center with `logo.png`, wordmark, and animated search trigger
+- Continue Watching, Trending, and seasonal/genre Explore rows
+- Provider controls are intentionally absent from Home
 
 **What to improve**:
 - Implemented smooth entrance animations, shelf fade-ins, glass-backed controls, card hover effects, and shimmer loading.
-- Home is fixed to the app viewport with a command/search surface plus Continue Watching and My List shelves.
+- Home is fixed to the app viewport with a command/search surface plus three compact discovery shelves.
 - The previous large featured anime hero has been removed; artwork remains in cards, search preview, and detail pages.
 
 ---
@@ -36,7 +39,7 @@ The previous agent session completed:
 
 **Current state**: `SearchStage` component (App.tsx L648-774) already has:
 - Dual-pane layout: left results list + right preview panel
-- Provider chips for switching sources
+- Language switch and title-specific provider availability
 - Auto-focus input on mount
 - AnimatePresence transitions on preview panel
 
@@ -80,6 +83,8 @@ The previous agent session completed:
 
 **Current state**: Desktop bundle release path exists for Apple Silicon macOS 15+ DMG/app, Windows NSIS/MSI, and Linux AppImage/deb/rpm. Homebrew Cask metadata exists at `packaging/homebrew/Casks/ani-desk.rb`, with tap-side files under `packaging/homebrew-tap/`. The local tap checkout for deployment validation is `/Users/phucdang/Documents/homebrew-ani-desk`.
 
+**Provider certification**: AllAnime remains the default English source but is currently CAPTCHA-gated by the upstream API and should surface `PROVIDER_CAPTCHA`. AnimeGG and MovieBox are the certified English playback fallbacks for v1.0.2. KKPhim and OPhim are certified Vietnamese playback providers. AnimeVietSub is integrated through AniMapper but remains intermittent because live stream requests can time out.
+
 **Verify**: Launch from Finder/Dock, Start Menu/taskbar, and Linux desktop launcher. The terminal command remains a developer fallback only.
 
 ---
@@ -90,11 +95,12 @@ The previous agent session completed:
 ```bash
 npm run build
 npm run check:icons
-npm run check:release-version -- v1.0.1
+npm run check:release-version -- v1.0.2
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo audit
+cargo run --example provider_certification -- --require-english
 pytest tests/e2e
 npm run tauri -- build --debug --no-bundle
 TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \

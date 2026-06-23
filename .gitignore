@@ -36,6 +36,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 .venv-e2e/
+.playwright-browsers/
 .pytest_cache/
 AGENTS.md
 

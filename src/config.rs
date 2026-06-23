@@ -21,10 +21,28 @@ pub struct SourcesConfig {
     pub allanime: bool,
 
     #[serde(default = "default_true")]
+    pub animegg: bool,
+
+    #[serde(default = "default_true")]
+    pub moviebox: bool,
+
+    #[serde(default = "default_true")]
     pub kkphim: bool,
 
     #[serde(default = "default_true")]
     pub ophim: bool,
+
+    #[serde(default = "default_true")]
+    pub animevietsub: bool,
+
+    #[serde(default)]
+    pub animetvn: bool,
+
+    #[serde(default)]
+    pub niniyo: bool,
+
+    #[serde(default)]
+    pub hianime: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,8 +72,14 @@ impl Default for SourcesConfig {
     fn default() -> Self {
         Self {
             allanime: true,
+            animegg: true,
+            moviebox: true,
             kkphim: true,
             ophim: true,
+            animevietsub: true,
+            animetvn: false,
+            niniyo: false,
+            hianime: false,
         }
     }
 }

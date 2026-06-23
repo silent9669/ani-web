@@ -1,5 +1,9 @@
 pub mod allanime;
+pub mod animegg;
+pub mod animevietsub;
+pub mod hianime;
 pub mod kkphim;
+pub mod moviebox;
 pub mod ophim;
 
 use crate::config::Config;
@@ -7,6 +11,28 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCapabilities {
+    pub search: bool,
+    pub details: bool,
+    pub episodes: bool,
+    pub playback: bool,
+    pub subtitles: bool,
+}
+
+impl Default for ProviderCapabilities {
+    fn default() -> Self {
+        Self {
+            search: true,
+            details: true,
+            episodes: true,
+            playback: true,
+            subtitles: true,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Anime {
@@ -62,6 +88,16 @@ pub trait AnimeProvider: Send + Sync {
     fn name(&self) -> &str;
     fn language(&self) -> Language;
     fn supported_languages(&self) -> Vec<String>;
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::default()
+    }
+
+    async fn health_check(&self) -> Result<()> {
+        if self.search("One Piece").await?.is_empty() {
+            anyhow::bail!("Provider returned no health-check results");
+        }
+        Ok(())
+    }
 
     async fn search(&self, query: &str) -> Result<Vec<Anime>>;
     async fn get_anime_details(&self, _anime_id: &str) -> Result<Option<Anime>> {
@@ -85,6 +121,18 @@ impl ProviderRegistry {
             providers.push(Arc::new(allanime::AllAnimeProvider::new()));
         }
 
+        if config.sources.animegg {
+            providers.push(Arc::new(animegg::AnimeGgProvider::new()));
+        }
+
+        if config.sources.moviebox {
+            providers.push(Arc::new(moviebox::MovieBoxProvider::new()));
+        }
+
+        if config.sources.hianime {
+            providers.push(Arc::new(hianime::HiAnimeProvider::new()));
+        }
+
         // --- Vietnamese Sources ---
         // 2. KKPhim
         if config.sources.kkphim {
@@ -94,6 +142,20 @@ impl ProviderRegistry {
         // 3. OPhim
         if config.sources.ophim {
             providers.push(Arc::new(ophim::OphimProvider::new()));
+        }
+
+        if config.sources.animevietsub {
+            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::new()));
+        }
+        if config.sources.animetvn {
+            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::for_provider(
+                "AnimeTVN", "ANIMETVN",
+            )));
+        }
+        if config.sources.niniyo {
+            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::for_provider(
+                "Niniyo", "NINIYO",
+            )));
         }
 
         Self { providers }
@@ -136,21 +198,27 @@ impl ProviderRegistry {
 }
 
 pub fn parse_episode_number(name: &str) -> u32 {
-    let mut ep_num = name
-        .replace("Tập ", "")
-        .replace("Tap ", "")
-        .trim()
-        .parse::<u32>()
-        .unwrap_or_else(|_| {
-            name.chars()
-                .filter(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .parse::<u32>()
-                .unwrap_or(0)
-        });
+    let normalized = name.replace("Tập ", "").replace("Tap ", "");
+    let token = normalized
+        .split(|character: char| !character.is_ascii_digit())
+        .find(|token| !token.is_empty())
+        .unwrap_or("");
+    let mut ep_num = token.parse::<u32>().unwrap_or(0);
 
     if ep_num == 0 && name.trim().eq_ignore_ascii_case("full") {
         ep_num = 1;
     }
     ep_num
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_episode_number;
+
+    #[test]
+    fn episode_parser_does_not_merge_decimal_specials() {
+        assert_eq!(parse_episode_number("Tập 1004.5"), 1004);
+        assert_eq!(parse_episode_number("Episode 1167"), 1167);
+        assert_eq!(parse_episode_number("Full"), 1);
+    }
 }

@@ -1,22 +1,33 @@
 mod proxy;
 
+use ani_desk_core::catalog::{
+    apply_personal_matches, CatalogAnime, CatalogClient, CatalogFilters, CatalogPage,
+    DiscoveryCatalog, TastePreference,
+};
 use ani_desk_core::config::Config;
 use ani_desk_core::db::{Database, WatchHistory};
 use ani_desk_core::metadata::MetadataCache;
 use ani_desk_core::player::Player;
-use ani_desk_core::providers::{Anime, Episode, Language, ProviderRegistry, StreamInfo, Subtitle};
+use ani_desk_core::providers::{
+    Anime, Episode, Language, ProviderCapabilities, ProviderRegistry, StreamInfo, Subtitle,
+};
 use anyhow::Context;
 use chrono::Utc;
 use proxy::ProxyState;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Manager, State};
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
 struct AppState {
     db: Arc<Database>,
     providers: ProviderRegistry,
     proxy: ProxyState,
     metadata: MetadataCache,
+    catalog: CatalogClient,
+    provider_health: RwLock<HashMap<String, ProviderHealthDto>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,12 +35,51 @@ struct AppState {
 struct SourceDto {
     name: String,
     language: String,
+    language_group: String,
+    status: String,
+    failure_code: Option<String>,
+    capabilities: ProviderCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHealthDto {
+    name: String,
+    language: String,
+    language_group: String,
+    status: String,
+    failure_code: Option<String>,
+    checked_at: Option<String>,
+    capabilities: ProviderCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderAvailabilityDto {
+    provider: String,
+    language: String,
+    status: String,
+    failure_code: Option<String>,
+    anime: Option<AnimeDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppErrorDto {
+    code: String,
+    message: String,
+    provider: Option<String>,
+    operation: String,
+    retryable: bool,
+    correlation_id: String,
+    technical: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AnimeDto {
     id: String,
+    catalog_id: Option<i64>,
     provider: String,
     title: String,
     cover_url: String,
@@ -62,6 +112,7 @@ struct EpisodeDto {
 #[serde(rename_all = "camelCase")]
 struct WatchHistoryDto {
     anime_id: String,
+    catalog_id: Option<i64>,
     provider: String,
     title: String,
     cover_url: String,
@@ -76,6 +127,7 @@ struct WatchHistoryDto {
 #[serde(rename_all = "camelCase")]
 struct FavoriteDto {
     anime_id: String,
+    catalog_id: Option<i64>,
     provider: String,
     title: String,
     cover_url: String,
@@ -104,6 +156,7 @@ struct SubtitleDto {
 #[serde(rename_all = "camelCase")]
 struct AnimeInput {
     id: String,
+    catalog_id: Option<i64>,
     provider: String,
     title: String,
     cover_url: String,
@@ -113,6 +166,7 @@ struct AnimeInput {
 #[serde(rename_all = "camelCase")]
 struct ProgressInput {
     anime_id: String,
+    catalog_id: Option<i64>,
     provider: String,
     title: String,
     cover_url: String,
@@ -123,36 +177,247 @@ struct ProgressInput {
 }
 
 #[tauri::command]
-async fn list_sources(state: State<'_, AppState>) -> Result<Vec<SourceDto>, String> {
+async fn list_sources(state: State<'_, AppState>) -> Result<Vec<SourceDto>, AppErrorDto> {
+    let health = state.provider_health.read().await.clone();
     Ok(state
         .providers
         .list_providers()
         .iter()
-        .map(|provider| SourceDto {
-            name: provider.name().to_string(),
-            language: language_label(provider.language()).to_string(),
+        .map(|provider| {
+            let current = health.get(provider.name());
+            SourceDto {
+                name: provider.name().to_string(),
+                language: language_label(provider.language()).to_string(),
+                language_group: language_group(provider.language()).to_string(),
+                status: current
+                    .map(|item| item.status.clone())
+                    .unwrap_or_else(|| "unknown".into()),
+                failure_code: current.and_then(|item| item.failure_code.clone()),
+                capabilities: provider.capabilities(),
+            }
         })
         .collect())
+}
+
+#[tauri::command]
+async fn list_provider_health(
+    state: State<'_, AppState>,
+) -> Result<Vec<ProviderHealthDto>, AppErrorDto> {
+    Ok(ensure_provider_health(&state, None)
+        .await
+        .into_values()
+        .collect())
+}
+
+#[tauri::command]
+async fn retry_provider_health(
+    state: State<'_, AppState>,
+    provider: Option<String>,
+) -> Result<Vec<ProviderHealthDto>, AppErrorDto> {
+    Ok(refresh_provider_health(&state, provider.as_deref())
+        .await
+        .into_values()
+        .collect())
+}
+
+#[tauri::command]
+async fn get_discovery(state: State<'_, AppState>) -> Result<DiscoveryCatalog, AppErrorDto> {
+    let mut discovery = state
+        .catalog
+        .discovery()
+        .await
+        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "discovery", None, error, true))?;
+    personalize_items(&state, &mut discovery.trending).await;
+    personalize_items(&state, &mut discovery.popular_this_season).await;
+    Ok(discovery)
+}
+
+#[tauri::command]
+async fn get_genre_catalog(
+    state: State<'_, AppState>,
+    genre: String,
+) -> Result<Vec<CatalogAnime>, AppErrorDto> {
+    let mut items = state
+        .catalog
+        .by_genre(genre.trim(), 18)
+        .await
+        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "genre", None, error, true))?;
+    personalize_items(&state, &mut items).await;
+    Ok(items)
+}
+
+#[tauri::command]
+async fn search_catalog(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<CatalogAnime>, AppErrorDto> {
+    let query = query.trim();
+    if query.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let mut items = state
+        .catalog
+        .search(query, 24)
+        .await
+        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "search", None, error, true))?;
+    personalize_items(&state, &mut items).await;
+    Ok(items)
+}
+
+#[tauri::command]
+async fn get_catalog(
+    state: State<'_, AppState>,
+    filters: CatalogFilters,
+    sort: String,
+    page: u32,
+) -> Result<CatalogPage, AppErrorDto> {
+    let mut result = state
+        .catalog
+        .catalog(&filters, &sort, page, 24)
+        .await
+        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "catalog", None, error, true))?;
+    personalize_items(&state, &mut result.items).await;
+    if sort == "personalMatch" {
+        result
+            .items
+            .sort_by_key(|item| std::cmp::Reverse(item.personal_match.unwrap_or(0)));
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn resolve_availability(
+    state: State<'_, AppState>,
+    catalog_id: i64,
+    title: String,
+    language_group_filter: Option<String>,
+) -> Result<Vec<ProviderAvailabilityDto>, AppErrorDto> {
+    let health = ensure_provider_health(&state, None).await;
+    let title_variants = catalog_title_variants(&state, catalog_id, &title).await;
+    let mut availability = Vec::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut provider_order = Vec::new();
+    for provider in state.providers.list_providers() {
+        let group = language_group(provider.language());
+        if language_group_filter
+            .as_deref()
+            .is_some_and(|filter| !filter.eq_ignore_ascii_case(group))
+        {
+            continue;
+        }
+        provider_order.push(provider.name().to_string());
+        let current = health.get(provider.name());
+        if current.is_some_and(|item| item.status == "unavailable") {
+            availability.push(ProviderAvailabilityDto {
+                provider: provider.name().into(),
+                language: language_label(provider.language()).into(),
+                status: "unavailable".into(),
+                failure_code: current.and_then(|item| item.failure_code.clone()),
+                anime: None,
+            });
+            continue;
+        }
+
+        let provider = provider.clone();
+        let title = title.clone();
+        let title_variants = title_variants.clone();
+        tasks.spawn(async move {
+            let name = provider.name().to_string();
+            let language = provider.language();
+            let search = async {
+                if matches!(name.as_str(), "AnimeVietSub" | "AnimeTVN" | "Niniyo") {
+                    Some(Anime {
+                        id: catalog_id.to_string(),
+                        provider: name.clone(),
+                        title: title.clone(),
+                        cover_url: String::new(),
+                        banner_url: None,
+                        language,
+                        total_episodes: None,
+                        synopsis: None,
+                    })
+                } else {
+                    let mut candidates = Vec::new();
+                    for variant in &title_variants {
+                        if let Ok(items) = provider.search(variant).await {
+                            candidates.extend(items);
+                        }
+                    }
+                    best_title_match(candidates, &title_variants)
+                }
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(8), search).await;
+            let (anime, failure_code) = match result {
+                Ok(anime) => {
+                    let missing = anime.is_none();
+                    (anime, missing.then(|| "TITLE_NOT_AVAILABLE".into()))
+                }
+                Err(_) => (None, Some("NETWORK_TIMEOUT".into())),
+            };
+            ProviderAvailabilityDto {
+                provider: name,
+                language: language_label(language).into(),
+                status: if anime.is_some() {
+                    "available"
+                } else {
+                    "unavailable"
+                }
+                .into(),
+                failure_code,
+                anime: anime.map(|item| map_anime(item, false, Some(catalog_id))),
+            }
+        });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(item) = result {
+            availability.push(item);
+        }
+    }
+    availability.sort_by_key(|item| {
+        provider_order
+            .iter()
+            .position(|provider| provider == &item.provider)
+            .unwrap_or(usize::MAX)
+    });
+    Ok(availability)
+}
+
+async fn catalog_title_variants(state: &AppState, catalog_id: i64, title: &str) -> Vec<String> {
+    let mut variants = Vec::new();
+    push_title_variant(&mut variants, title);
+    if let Ok(items) = state.catalog.by_ids(&[catalog_id]).await {
+        if let Some(item) = items.into_iter().next() {
+            push_title_variant(&mut variants, &item.title);
+            if let Some(native) = item.native_title {
+                push_title_variant(&mut variants, &native);
+            }
+        }
+    }
+    for alias in fixed_title_aliases(title) {
+        push_title_variant(&mut variants, alias);
+    }
+    variants
 }
 
 #[tauri::command]
 async fn get_continue_watching(
     state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Result<Vec<WatchHistoryDto>, String> {
+) -> Result<Vec<WatchHistoryDto>, AppErrorDto> {
     state
         .db
         .get_continue_watching(limit.unwrap_or(20))
         .await
         .map(|items| items.into_iter().map(map_history).collect())
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "history", None, error, true))
 }
 
 #[tauri::command]
 async fn get_my_list(
     state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Result<Vec<FavoriteDto>, String> {
+) -> Result<Vec<FavoriteDto>, AppErrorDto> {
     state
         .db
         .get_favorites(limit.unwrap_or(100))
@@ -160,15 +425,67 @@ async fn get_my_list(
         .map(|items| {
             items
                 .into_iter()
-                .map(|(anime_id, provider, title, cover_url)| FavoriteDto {
-                    anime_id,
-                    provider,
-                    title,
-                    cover_url,
-                })
+                .map(
+                    |(anime_id, catalog_id, provider, title, cover_url)| FavoriteDto {
+                        anime_id,
+                        catalog_id,
+                        provider,
+                        title,
+                        cover_url,
+                    },
+                )
                 .collect()
         })
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))
+}
+
+#[tauri::command]
+async fn get_my_list_catalog(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<CatalogAnime>, AppErrorDto> {
+    let mut favorites = state
+        .db
+        .get_favorites(limit.unwrap_or(30))
+        .await
+        .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))?;
+    for favorite in favorites
+        .iter_mut()
+        .filter(|(_, catalog_id, _, _, _)| catalog_id.is_none())
+        .take(10)
+    {
+        let anime_id = favorite.0.clone();
+        let title = favorite.3.clone();
+        if let Ok(matches) = state.catalog.search(&title, 3).await {
+            if let Some(item) = matches
+                .into_iter()
+                .find(|item| normalize_title(&item.title) == normalize_title(&title))
+            {
+                let _ = state
+                    .db
+                    .update_favorite_catalog_id(&anime_id, item.catalog_id)
+                    .await;
+                favorite.1 = Some(item.catalog_id);
+            }
+        }
+    }
+    let ids = favorites
+        .iter()
+        .filter_map(|(_, catalog_id, _, _, _)| *catalog_id)
+        .collect::<Vec<_>>();
+    let mut items = state
+        .catalog
+        .by_ids(&ids)
+        .await
+        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "favorites", None, error, true))?;
+    items.sort_by_key(|item| {
+        favorites
+            .iter()
+            .position(|(_, catalog_id, _, _, _)| *catalog_id == Some(item.catalog_id))
+            .unwrap_or(usize::MAX)
+    });
+    personalize_items(&state, &mut items).await;
+    Ok(items)
 }
 
 #[tauri::command]
@@ -176,7 +493,7 @@ async fn search_source(
     state: State<'_, AppState>,
     source: String,
     query: String,
-) -> Result<Vec<AnimeDto>, String> {
+) -> Result<Vec<AnimeDto>, AppErrorDto> {
     let query = query.trim().to_string();
     if query.len() < 2 {
         return Ok(Vec::new());
@@ -186,14 +503,25 @@ async fn search_source(
         .providers
         .get_provider(&source)
         .cloned()
-        .ok_or_else(|| format!("Source '{}' is not available", source))?;
+        .ok_or_else(|| {
+            app_error_message(
+                "PROVIDER_UNAVAILABLE",
+                "search",
+                Some(&source),
+                "Source is not available",
+                false,
+            )
+        })?;
 
-    let results = provider.search(&query).await.map_err(to_string_error)?;
+    let results = provider
+        .search(&query)
+        .await
+        .map_err(|error| provider_error("search", &source, error))?;
     let mut mapped = Vec::with_capacity(results.len());
     for anime in results {
         let key = anime_key(&anime.provider, &anime.id);
         let is_favorite = state.db.is_favorite(&key).await.unwrap_or(false);
-        mapped.push(map_anime(anime, is_favorite));
+        mapped.push(map_anime(anime, is_favorite, None));
     }
 
     Ok(mapped)
@@ -205,7 +533,7 @@ async fn get_anime_details(
     provider: String,
     anime_id: String,
     title: String,
-) -> Result<AnimeDetailsDto, String> {
+) -> Result<AnimeDetailsDto, AppErrorDto> {
     let mut details = AnimeDetailsDto::default();
 
     if let Some(provider_ref) = state.providers.get_provider(&provider).cloned() {
@@ -262,18 +590,26 @@ async fn get_episodes(
     state: State<'_, AppState>,
     provider: String,
     anime_id: String,
-) -> Result<Vec<EpisodeDto>, String> {
-    let provider = state
+) -> Result<Vec<EpisodeDto>, AppErrorDto> {
+    let provider_ref = state
         .providers
         .get_provider(&provider)
         .cloned()
-        .ok_or_else(|| format!("Provider '{}' is not available", provider))?;
+        .ok_or_else(|| {
+            app_error_message(
+                "PROVIDER_UNAVAILABLE",
+                "episodes",
+                Some(&provider),
+                "Provider is not available",
+                false,
+            )
+        })?;
 
-    provider
+    provider_ref
         .get_episodes(&anime_id)
         .await
         .map(|episodes| episodes.into_iter().map(map_episode).collect())
-        .map_err(to_string_error)
+        .map_err(|error| provider_error("episodes", &provider, error))
 }
 
 #[tauri::command]
@@ -281,14 +617,14 @@ async fn prepare_playback(
     state: State<'_, AppState>,
     provider: String,
     episode_id: String,
-) -> Result<PlaybackDto, String> {
+) -> Result<PlaybackDto, AppErrorDto> {
     let stream = resolve_stream(&state, &provider, &episode_id).await?;
     let stream_kind = playback_stream_kind(&stream.video_url).to_string();
     let session = state
         .proxy
         .create_session(&stream)
         .await
-        .map_err(to_string_error)?;
+        .map_err(|error| app_error("PROXY_FAILED", "proxy", Some(&provider), error, true))?;
 
     Ok(PlaybackDto {
         session_id: session.session_id,
@@ -307,7 +643,7 @@ async fn open_in_mpv(
     provider: String,
     episode_id: String,
     start_time: Option<u64>,
-) -> Result<(), String> {
+) -> Result<(), AppErrorDto> {
     let stream = resolve_stream(&state, &provider, &episode_id).await?;
     Player::new()
         .start_detached(
@@ -316,13 +652,25 @@ async fn open_in_mpv(
             &stream.headers,
             start_time,
         )
-        .map_err(to_string_error)
+        .map_err(|error| {
+            app_error(
+                "PLAYER_LAUNCH_FAILED",
+                "player",
+                Some(&provider),
+                error,
+                true,
+            )
+        })
 }
 
 #[tauri::command]
-async fn save_progress(state: State<'_, AppState>, progress: ProgressInput) -> Result<(), String> {
+async fn save_progress(
+    state: State<'_, AppState>,
+    progress: ProgressInput,
+) -> Result<(), AppErrorDto> {
     let history = WatchHistory {
         anime_id: progress.anime_id,
+        catalog_id: progress.catalog_id,
         provider: progress.provider,
         title: progress.title,
         cover_url: progress.cover_url,
@@ -337,60 +685,78 @@ async fn save_progress(state: State<'_, AppState>, progress: ProgressInput) -> R
         .db
         .save_watch_history(&history)
         .await
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "progress", None, error, true))
 }
 
 #[tauri::command]
-async fn add_to_my_list(state: State<'_, AppState>, anime: AnimeInput) -> Result<(), String> {
+async fn add_to_my_list(state: State<'_, AppState>, anime: AnimeInput) -> Result<(), AppErrorDto> {
     let key = anime_key(&anime.provider, &anime.id);
     state
         .db
-        .save_favorite(&key, &anime.provider, &anime.title, &anime.cover_url)
+        .save_favorite(
+            &key,
+            anime.catalog_id,
+            &anime.provider,
+            &anime.title,
+            &anime.cover_url,
+        )
         .await
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))
 }
 
 #[tauri::command]
-async fn remove_from_my_list(state: State<'_, AppState>, anime_id: String) -> Result<(), String> {
+async fn remove_from_my_list(
+    state: State<'_, AppState>,
+    anime_id: String,
+) -> Result<(), AppErrorDto> {
     state
         .db
         .remove_favorite(&anime_id)
         .await
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))
 }
 
 #[tauri::command]
 async fn remove_continue_watching(
     state: State<'_, AppState>,
     anime_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppErrorDto> {
     state
         .db
         .remove_from_continue_watching(&anime_id)
         .await
-        .map_err(to_string_error)
+        .map_err(|error| app_error("DATABASE_ERROR", "history", None, error, true))
 }
 
 async fn resolve_stream(
     state: &AppState,
     provider: &str,
     episode_id: &str,
-) -> Result<StreamInfo, String> {
+) -> Result<StreamInfo, AppErrorDto> {
     let provider_ref = state
         .providers
         .get_provider(provider)
         .cloned()
-        .ok_or_else(|| format!("Provider '{}' is not available", provider))?;
+        .ok_or_else(|| {
+            app_error_message(
+                "PROVIDER_UNAVAILABLE",
+                "stream",
+                Some(provider),
+                "Provider is not available",
+                false,
+            )
+        })?;
 
     provider_ref
         .get_stream_url(episode_id)
         .await
-        .map_err(to_string_error)
+        .map_err(|error| provider_error("stream", provider, error))
 }
 
-fn map_anime(anime: Anime, is_favorite: bool) -> AnimeDto {
+fn map_anime(anime: Anime, is_favorite: bool, catalog_id: Option<i64>) -> AnimeDto {
     AnimeDto {
         id: anime.id,
+        catalog_id,
         provider: anime.provider,
         title: anime.title,
         cover_url: anime.cover_url,
@@ -414,6 +780,7 @@ fn map_episode(episode: Episode) -> EpisodeDto {
 fn map_history(history: WatchHistory) -> WatchHistoryDto {
     WatchHistoryDto {
         anime_id: history.anime_id,
+        catalog_id: history.catalog_id,
         provider: history.provider,
         title: history.title,
         cover_url: history.cover_url,
@@ -433,8 +800,11 @@ fn map_subtitle(subtitle: Subtitle) -> SubtitleDto {
 }
 
 fn playback_stream_kind(url: &str) -> &'static str {
-    if url.to_ascii_lowercase().contains(".m3u8") {
+    let lowercase = url.to_ascii_lowercase();
+    if lowercase.contains(".m3u8") {
         "hls"
+    } else if lowercase.contains(".mpd") {
+        "dash"
     } else {
         "native"
     }
@@ -444,6 +814,111 @@ fn language_label(language: Language) -> &'static str {
     match language {
         Language::English => "English",
         Language::Vietnamese => "Vietnamese",
+    }
+}
+
+fn language_group(language: Language) -> &'static str {
+    match language {
+        Language::English => "english",
+        Language::Vietnamese => "vietnamese",
+    }
+}
+
+fn best_title_match(items: Vec<Anime>, title_variants: &[String]) -> Option<Anime> {
+    let mut scored = items
+        .into_iter()
+        .map(|item| (best_title_score(&item.title, title_variants), item))
+        .filter(|(score, _)| *score >= 300)
+        .collect::<Vec<_>>();
+    scored.sort_by_key(|(score, item)| {
+        (
+            std::cmp::Reverse(*score),
+            std::cmp::Reverse(item.total_episodes.unwrap_or_default()),
+        )
+    });
+    scored.into_iter().map(|(_, item)| item).next()
+}
+
+fn normalize_title(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn title_words(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_lowercase())
+        .collect()
+}
+
+fn best_title_score(title: &str, variants: &[String]) -> i32 {
+    variants
+        .iter()
+        .map(|variant| title_match_score(title, variant))
+        .max()
+        .unwrap_or(0)
+}
+
+fn title_match_score(title: &str, target: &str) -> i32 {
+    let title_compact = normalize_title(title);
+    let target_compact = normalize_title(target);
+    if title_compact.is_empty() || target_compact.is_empty() {
+        return 0;
+    }
+    if title_compact == target_compact {
+        return 1000;
+    }
+    if title_compact.starts_with(&target_compact) || target_compact.starts_with(&title_compact) {
+        return 760;
+    }
+    if title_compact.contains(&target_compact) || target_compact.contains(&title_compact) {
+        return 620;
+    }
+
+    let words_for_title = title_words(title);
+    let target_words = title_words(target);
+    if words_for_title.is_empty() || target_words.is_empty() {
+        return 0;
+    }
+    let overlap = target_words
+        .iter()
+        .filter(|word| words_for_title.contains(word))
+        .count();
+    let required = target_words.len().min(words_for_title.len());
+    if required > 0 && overlap == required {
+        return 420;
+    }
+    if overlap >= 2 {
+        return 300 + (overlap as i32 * 20);
+    }
+    0
+}
+
+fn push_title_variant(variants: &mut Vec<String>, value: &str) {
+    let trimmed = value.trim().trim_end_matches('.').trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !variants
+        .iter()
+        .any(|existing| normalize_title(existing) == normalize_title(trimmed))
+    {
+        variants.push(trimmed.to_string());
+    }
+}
+
+fn fixed_title_aliases(title: &str) -> Vec<&'static str> {
+    match normalize_title(title).as_str() {
+        "yourname" | "kiminonawa" => vec!["Your Name", "Kimi no Na wa"],
+        "caseclosed" | "detectiveconan" | "meitanteiconan" => {
+            vec!["Case Closed", "Detective Conan", "Meitantei Conan"]
+        }
+        "onepiece" | "daohaitac" | "đảohảitặc" => vec!["One Piece", "Đảo Hải Tặc"],
+        _ => Vec::new(),
     }
 }
 
@@ -460,8 +935,233 @@ fn non_empty(value: String) -> Option<String> {
     }
 }
 
-fn to_string_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
+fn provider_error(operation: &str, provider: &str, error: impl std::fmt::Display) -> AppErrorDto {
+    let technical = error.to_string();
+    let lower = technical.to_ascii_lowercase();
+    let code = if lower.contains("need_captcha") || lower.contains("captcha") {
+        "PROVIDER_CAPTCHA"
+    } else if lower.contains("403") || lower.contains("forbidden") {
+        "STREAM_FORBIDDEN"
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "NETWORK_TIMEOUT"
+    } else if lower.contains("mapping_not_found") || lower.contains("title_not_available") {
+        "TITLE_NOT_AVAILABLE"
+    } else if lower.contains("not certified") {
+        "PROVIDER_NOT_CERTIFIED"
+    } else if operation == "stream" {
+        "STREAM_NOT_FOUND"
+    } else {
+        "PROVIDER_UNAVAILABLE"
+    };
+    app_error(code, operation, Some(provider), technical, true)
+}
+
+fn app_error(
+    code: &str,
+    operation: &str,
+    provider: Option<&str>,
+    error: impl std::fmt::Display,
+    retryable: bool,
+) -> AppErrorDto {
+    let technical = sanitize_technical(&error.to_string());
+    AppErrorDto {
+        code: code.into(),
+        message: user_error_message(code).into(),
+        provider: provider.map(str::to_string),
+        operation: operation.into(),
+        retryable,
+        correlation_id: Uuid::new_v4().to_string(),
+        technical: (!technical.is_empty()).then_some(technical),
+    }
+}
+
+fn app_error_message(
+    code: &str,
+    operation: &str,
+    provider: Option<&str>,
+    message: &str,
+    retryable: bool,
+) -> AppErrorDto {
+    let mut error = app_error(code, operation, provider, message, retryable);
+    error.message = message.into();
+    error
+}
+
+fn user_error_message(code: &str) -> &'static str {
+    match code {
+        "PROVIDER_CAPTCHA" => "This provider requires verification and is temporarily unavailable.",
+        "PROVIDER_NOT_CERTIFIED" => "This provider has not passed playback certification.",
+        "PROVIDER_UNAVAILABLE" => "The selected provider is currently unavailable.",
+        "TITLE_NOT_AVAILABLE" => "This title is not available from the selected provider.",
+        "STREAM_FORBIDDEN" => "The stream host rejected the playback request.",
+        "STREAM_NOT_FOUND" => "No working stream was found for this episode.",
+        "NETWORK_TIMEOUT" => "The provider did not respond in time.",
+        "CATALOG_UNAVAILABLE" => "Anime discovery is temporarily unavailable.",
+        "PROXY_FAILED" => "The local playback proxy could not start this stream.",
+        "PLAYER_LAUNCH_FAILED" => "The external player could not be opened.",
+        "DATABASE_ERROR" => "The local library could not be updated.",
+        _ => "ani-desk could not complete this request.",
+    }
+}
+
+fn sanitize_technical(value: &str) -> String {
+    let sanitized = value
+        .split_whitespace()
+        .map(|part| {
+            if part.starts_with("http://") || part.starts_with("https://") {
+                "[redacted-url]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    sanitized.chars().take(600).collect()
+}
+
+async fn personalize_items(state: &AppState, items: &mut [CatalogAnime]) {
+    let histories = state
+        .db
+        .get_continue_watching(100)
+        .await
+        .unwrap_or_default();
+    let favorites = state.db.get_favorites(100).await.unwrap_or_default();
+    let mut weighted_ids = Vec::new();
+
+    for history in &histories {
+        if let Some(catalog_id) = history.catalog_id {
+            let progress = if history.total_seconds > 0 {
+                history.position_seconds as f64 / history.total_seconds as f64
+            } else {
+                0.0
+            };
+            weighted_ids.push((catalog_id, 1.0 + 2.0 * progress.clamp(0.0, 1.0)));
+        }
+    }
+    for (_, catalog_id, _, _, _) in &favorites {
+        if let Some(catalog_id) = catalog_id {
+            weighted_ids.push((*catalog_id, 3.0));
+        }
+    }
+
+    // Resolve a bounded number of legacy rows per request so migration remains lazy.
+    for history in histories
+        .iter()
+        .filter(|item| item.catalog_id.is_none())
+        .take(2)
+    {
+        if let Ok(matches) = state.catalog.search(&history.title, 3).await {
+            if let Some(item) = matches
+                .into_iter()
+                .find(|item| normalize_title(&item.title) == normalize_title(&history.title))
+            {
+                let _ = state
+                    .db
+                    .update_history_catalog_id(&history.anime_id, item.catalog_id)
+                    .await;
+                weighted_ids.push((item.catalog_id, 1.0));
+            }
+        }
+    }
+    for (anime_id, _catalog_id, _, title, _) in favorites
+        .iter()
+        .filter(|(_, catalog_id, _, _, _)| catalog_id.is_none())
+        .take(2)
+    {
+        if let Ok(matches) = state.catalog.search(title, 3).await {
+            if let Some(item) = matches
+                .into_iter()
+                .find(|item| normalize_title(&item.title) == normalize_title(title))
+            {
+                let _ = state
+                    .db
+                    .update_favorite_catalog_id(anime_id, item.catalog_id)
+                    .await;
+                weighted_ids.push((item.catalog_id, 3.0));
+            }
+        }
+    }
+
+    let ids = weighted_ids.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let metadata = state.catalog.by_ids(&ids).await.unwrap_or_default();
+    let preferences = weighted_ids
+        .into_iter()
+        .filter_map(|(id, weight)| {
+            metadata
+                .iter()
+                .find(|item| item.catalog_id == id)
+                .map(|item| TastePreference {
+                    genres: item.genres.clone(),
+                    weight,
+                })
+        })
+        .collect::<Vec<_>>();
+    apply_personal_matches(items, &preferences);
+}
+
+async fn ensure_provider_health(
+    state: &AppState,
+    provider: Option<&str>,
+) -> HashMap<String, ProviderHealthDto> {
+    let cached = state.provider_health.read().await.clone();
+    let cache_is_fresh = !cached.is_empty()
+        && cached.values().all(|item| {
+            item.checked_at
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .is_some_and(|checked| Utc::now().signed_duration_since(checked).num_minutes() < 5)
+        });
+    if provider.is_none() && cache_is_fresh {
+        return cached;
+    }
+    refresh_provider_health(state, provider).await
+}
+
+async fn refresh_provider_health(
+    state: &AppState,
+    selected: Option<&str>,
+) -> HashMap<String, ProviderHealthDto> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for provider in state.providers.list_providers() {
+        if selected.is_some_and(|name| name != provider.name()) {
+            continue;
+        }
+        let provider = provider.clone();
+        tasks.spawn(async move {
+            let name = provider.name().to_string();
+            let language = provider.language();
+            let capabilities = provider.capabilities();
+            let result = provider.health_check().await;
+            let (status, failure_code) = match result {
+                Ok(()) => ("healthy".to_string(), None),
+                Err(error) => {
+                    let classified = provider_error("health", &name, error);
+                    ("unavailable".to_string(), Some(classified.code))
+                }
+            };
+            ProviderHealthDto {
+                name,
+                language: language_label(language).into(),
+                language_group: language_group(language).into(),
+                status,
+                failure_code,
+                checked_at: Some(Utc::now().to_rfc3339()),
+                capabilities,
+            }
+        });
+    }
+
+    let mut updates = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(item) = result {
+            updates.push(item);
+        }
+    }
+    let mut health = state.provider_health.write().await;
+    for item in updates {
+        health.insert(item.name.clone(), item);
+    }
+    health.clone()
 }
 
 fn main() {
@@ -483,20 +1183,31 @@ fn main() {
             let proxy = tauri::async_runtime::block_on(ProxyState::start())
                 .context("Failed to start playback proxy")?;
             let metadata = MetadataCache::new(db.clone());
+            let catalog = CatalogClient::new();
 
             app.manage(AppState {
                 db,
                 providers,
                 proxy,
                 metadata,
+                catalog,
+                provider_health: RwLock::new(HashMap::new()),
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_sources,
+            list_provider_health,
+            retry_provider_health,
+            get_discovery,
+            get_genre_catalog,
+            get_catalog,
+            search_catalog,
+            resolve_availability,
             get_continue_watching,
             get_my_list,
+            get_my_list_catalog,
             search_source,
             get_anime_details,
             get_episodes,
@@ -509,4 +1220,36 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ani-desk");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_errors_have_stable_codes() {
+        assert_eq!(
+            provider_error("stream", "AllAnime", "NEED_CAPTCHA").code,
+            "PROVIDER_CAPTCHA"
+        );
+        assert_eq!(
+            provider_error("stream", "Example", "HTTP 403 forbidden").code,
+            "STREAM_FORBIDDEN"
+        );
+        assert_eq!(
+            provider_error("stream", "Example", "no candidates").code,
+            "STREAM_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn diagnostics_redact_urls_and_are_bounded() {
+        let sanitized = sanitize_technical(&format!(
+            "request https://example.com/private?token=secret {}",
+            "x".repeat(900)
+        ));
+        assert!(!sanitized.contains("secret"));
+        assert!(sanitized.contains("[redacted-url]"));
+        assert!(sanitized.chars().count() <= 600);
+    }
 }

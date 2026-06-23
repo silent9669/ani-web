@@ -1,11 +1,42 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Anime, AnimeDetails, Episode, Favorite, Playback, Source, WatchHistory } from "./types";
+import type {
+  Anime,
+  AnimeDetails,
+  CatalogAnime,
+  CatalogFilters,
+  CatalogPage,
+  DiscoveryCatalog,
+  Episode,
+  Favorite,
+  Playback,
+  ProviderAvailability,
+  Source,
+  WatchHistory,
+} from "./types";
 
 export const api = {
   listSources: () => invoke<Source[]>("list_sources"),
+  listProviderHealth: () => invoke<Source[]>("list_provider_health"),
+  retryProviderHealth: (provider?: string) =>
+    invoke<Source[]>("retry_provider_health", { provider }),
+  getDiscovery: () => invoke<DiscoveryCatalog>("get_discovery"),
+  getGenreCatalog: (genre: string) =>
+    invoke<CatalogAnime[]>("get_genre_catalog", { genre }),
+  getCatalog: (filters: CatalogFilters, sort: string, page = 1) =>
+    invoke<CatalogPage>("get_catalog", { filters, sort, page }),
+  searchCatalog: (query: string) =>
+    invoke<CatalogAnime[]>("search_catalog", { query }),
+  resolveAvailability: (catalogId: number, title: string, languageGroupFilter?: string) =>
+    invoke<ProviderAvailability[]>("resolve_availability", {
+      catalogId,
+      title,
+      languageGroupFilter,
+    }),
   getContinueWatching: (limit = 20) =>
     invoke<WatchHistory[]>("get_continue_watching", { limit }),
   getMyList: (limit = 100) => invoke<Favorite[]>("get_my_list", { limit }),
+  getMyListCatalog: (limit = 30) =>
+    invoke<CatalogAnime[]>("get_my_list_catalog", { limit }),
   searchSource: (source: string, query: string) =>
     invoke<Anime[]>("search_source", { source, query }),
   getAnimeDetails: (provider: string, animeId: string, title: string) =>
@@ -22,6 +53,7 @@ export const api = {
     }),
   saveProgress: (progress: {
     animeId: string;
+    catalogId?: number | null;
     provider: string;
     title: string;
     coverUrl: string;
@@ -34,6 +66,7 @@ export const api = {
     invoke<void>("add_to_my_list", {
       anime: {
         id: anime.id,
+        catalogId: anime.catalogId ?? null,
         provider: anime.provider,
         title: anime.title,
         coverUrl: anime.coverUrl,
@@ -52,6 +85,7 @@ export const favoriteToAnime = (favorite: Favorite): Anime => ({
     ? favorite.animeId.split(":").slice(1).join(":")
     : favorite.animeId,
   provider: favorite.provider,
+  catalogId: favorite.catalogId ?? null,
   title: favorite.title,
   coverUrl: favorite.coverUrl,
   bannerUrl: null,

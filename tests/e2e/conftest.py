@@ -57,13 +57,15 @@ def mocked_page(page, vite_server):
         const getMockState = () => {
             const defaults = {
                 sources: [
-                    { name: "AllAnime", language: "English" },
-                    { name: "KKPhim", language: "Vietnamese" },
-                    { name: "OPhim", language: "Vietnamese" }
+                    { name: "AllAnime", language: "English", languageGroup: "english", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
+                    { name: "KKPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
+                    { name: "OPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
+                    { name: "AnimeVietSub", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: false } }
                 ],
                 my_list: [
                     {
                         animeId: "AllAnime:naruto",
+                        catalogId: 20,
                         provider: "AllAnime",
                         title: "Naruto",
                         coverUrl: "https://example.com/naruto.jpg"
@@ -72,6 +74,7 @@ def mocked_page(page, vite_server):
                 continue_watching: [
                     {
                         animeId: "AllAnime:one-piece",
+                        catalogId: 21,
                         provider: "AllAnime",
                         title: "One Piece",
                         coverUrl: "https://example.com/one-piece.jpg",
@@ -112,6 +115,89 @@ def mocked_page(page, vite_server):
 
             if (cmd === "list_sources") {
                 return state.sources;
+            } else if (cmd === "list_provider_health" || cmd === "retry_provider_health") {
+                return state.sources;
+            } else if (cmd === "get_discovery") {
+                const makeCatalog = (index) => ({
+                    catalogId: 1000 + index,
+                    title: index === 0 ? "One Piece" : `Catalog Anime ${index + 1}`,
+                    nativeTitle: null,
+                    description: `Catalog synopsis ${index + 1}.`,
+                    coverUrl: `https://example.com/catalog-${index + 1}.jpg`,
+                    bannerUrl: `https://example.com/catalog-banner-${index + 1}.jpg`,
+                    genres: index % 2 ? ["Action"] : ["Adventure"],
+                    totalEpisodes: index === 0 ? 1200 : 12,
+                    score: 80 + (index % 10),
+                    personalMatch: 84 + (index % 10),
+                    format: "TV",
+                    seasonYear: 2026
+                });
+                return {
+                    trending: Array.from({ length: 14 }, (_, index) => makeCatalog(index)),
+                    popularThisSeason: Array.from({ length: 14 }, (_, index) => makeCatalog(index + 20)),
+                    genres: ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Mystery"]
+                };
+            } else if (cmd === "get_genre_catalog") {
+                return Array.from({ length: 14 }, (_, index) => ({
+                    catalogId: 2000 + index,
+                    title: `${args.genre} Anime ${index + 1}`,
+                    nativeTitle: null,
+                    description: `${args.genre} catalog title.`,
+                    coverUrl: `https://example.com/genre-${index + 1}.jpg`,
+                    bannerUrl: null,
+                    genres: [args.genre],
+                    totalEpisodes: 12,
+                    score: 84,
+                    format: "TV",
+                    seasonYear: 2026
+                }));
+            } else if (cmd === "get_catalog") {
+                const page = args.page || 1;
+                return {
+                    page,
+                    hasNextPage: page < 2,
+                    items: Array.from({ length: 24 }, (_, index) => ({
+                        catalogId: page * 10000 + index,
+                        title: `${args.filters.genre || "Trending"} Anime ${index + 1}`,
+                        nativeTitle: null,
+                        description: "Catalog browser synopsis.",
+                        coverUrl: `https://example.com/browser-${index + 1}.jpg`,
+                        bannerUrl: null,
+                        genres: [args.filters.genre || "Action"],
+                        totalEpisodes: 12,
+                        score: 82,
+                        personalMatch: 91 - (index % 10),
+                        format: "TV",
+                        status: "RELEASING",
+                        seasonYear: 2026
+                    }))
+                };
+            } else if (cmd === "search_catalog") {
+                if (state.search_error) throw state.search_error;
+                if ((args.query || "").toLowerCase().includes("empty")) return [];
+                return Array.from({ length: 16 }, (_, index) => ({
+                    catalogId: 3000 + index,
+                    title: index === 0 ? "Naruto Shippuden" : `Sample Anime ${index + 1}`,
+                    nativeTitle: null,
+                    description: index === 0 ? "A story about Naruto." : `Sample synopsis ${index + 1}.`,
+                    coverUrl: `https://example.com/search-${index + 1}.jpg`,
+                    bannerUrl: `https://example.com/search-banner-${index + 1}.jpg`,
+                    genres: ["Action", "Adventure"],
+                    totalEpisodes: index === 0 ? 1200 : 12,
+                    score: 88,
+                    format: "TV",
+                    seasonYear: 2026
+                }));
+            } else if (cmd === "resolve_availability") {
+                const group = args.languageGroupFilter;
+                if (group === "english") {
+                    return [{ provider: "AllAnime", language: "English", status: "available", failureCode: null, anime: { id: "naruto-shippuden", catalogId: args.catalogId, provider: "AllAnime", title: args.title, coverUrl: "https://example.com/search-1.jpg", bannerUrl: null, language: "English", totalEpisodes: 1200, synopsis: null, isFavorite: false } }];
+                }
+                return [
+                    { provider: "KKPhim", language: "Vietnamese", status: "available", failureCode: null, anime: { id: "naruto-shippuden", catalogId: args.catalogId, provider: "KKPhim", title: args.title, coverUrl: "https://example.com/search-1.jpg", bannerUrl: null, language: "Vietnamese", totalEpisodes: 1200, synopsis: null, isFavorite: false } },
+                    { provider: "OPhim", language: "Vietnamese", status: "unavailable", failureCode: "TITLE_NOT_AVAILABLE", anime: null },
+                    { provider: "AnimeVietSub", language: "Vietnamese", status: "available", failureCode: null, anime: { id: String(args.catalogId), catalogId: args.catalogId, provider: "AnimeVietSub", title: args.title, coverUrl: "https://example.com/search-1.jpg", bannerUrl: null, language: "Vietnamese", totalEpisodes: 1200, synopsis: null, isFavorite: false } }
+                ];
             } else if (cmd === "plugin:updater|check") {
                 if (state.update_error) {
                     throw new Error(state.update_error);
@@ -121,10 +207,10 @@ def mocked_page(page, vite_server):
                 }
                 return {
                     rid: 101,
-                    currentVersion: "1.0.0",
-                    version: "1.0.1",
+                    currentVersion: "1.0.1",
+                    version: "1.0.2",
                     date: "2026-06-14T00:00:00Z",
-                    body: "Mock v1.0.1 updater release.",
+                    body: "Mock v1.0.2 updater release.",
                     rawJson: {}
                 };
             } else if (cmd === "plugin:updater|download_and_install") {
@@ -148,6 +234,21 @@ def mocked_page(page, vite_server):
                 return state.continue_watching;
             } else if (cmd === "get_my_list") {
                 return state.my_list;
+            } else if (cmd === "get_my_list_catalog") {
+                return state.my_list.map((item, index) => ({
+                    catalogId: item.catalogId || 20 + index,
+                    title: item.title,
+                    nativeTitle: null,
+                    description: "Saved title.",
+                    coverUrl: item.coverUrl,
+                    bannerUrl: null,
+                    genres: ["Action"],
+                    totalEpisodes: 12,
+                    score: 82,
+                    personalMatch: 94,
+                    format: "TV",
+                    seasonYear: 2026
+                }));
             } else if (cmd === "search_source") {
                 if (state.search_error) {
                     throw new Error(state.search_error);

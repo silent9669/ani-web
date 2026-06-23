@@ -1,6 +1,6 @@
 [package]
 name = "ani-desk-core"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["silent9669 <dev@silent9669.com>"]
 description = "Core provider, playback, and storage library for ani-desk"
@@ -62,6 +62,8 @@ semver = "1.0"
 aes = "0.8"
 ctr = "0.9"
 sha2 = "0.10"
+hmac = "0.12"
+md-5 = "0.10"
 
 # Installer utilities
 indicatif = "0.17"

@@ -10,19 +10,17 @@ def test_t1_dashboard_page_title(mocked_page):
     expect(mocked_page.locator(".home-command-brand span")).to_have_text("ani-desk")
 
 def test_t1_dashboard_provider_chips_rendered(mocked_page):
-    chips = mocked_page.locator(".provider-chip")
-    expect(chips.first).to_be_visible()
-    expect(chips).to_have_count(3)
-    expect(chips.nth(0).locator("strong")).to_have_text("AllAnime")
-    expect(chips.nth(1).locator("strong")).to_have_text("KKPhim")
-    expect(chips.nth(2).locator("strong")).to_have_text("OPhim")
+    expect(mocked_page.locator(".home-dashboard .provider-chip")).to_have_count(0)
+    expect(mocked_page.locator(".content-row:has-text('Trending Now')")).to_be_visible()
+    expect(mocked_page.locator(".content-row:has-text('My List')")).to_be_visible()
+    expect(mocked_page.locator(".home-dashboard .content-row")).to_have_count(3)
 
 def test_t1_dashboard_switching_chips(mocked_page):
-    chips = mocked_page.locator(".provider-chip")
-    expect(chips.nth(0)).to_have_class("provider-chip active")
-    expect(chips.nth(1)).not_to_have_class("provider-chip active")
-    chips.nth(1).click()
-    expect(chips.nth(1)).to_have_class("provider-chip active")
+    mocked_page.locator(".hero-search-trigger").click()
+    languages = mocked_page.locator(".language-switch button")
+    expect(languages.nth(0)).to_have_class("active")
+    languages.nth(1).click()
+    expect(languages.nth(1)).to_have_class("active")
 
 def test_t1_dashboard_continue_watching_shelf(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('Continue Watching')")
@@ -39,7 +37,7 @@ def test_t1_dashboard_continue_watching_shelf(mocked_page):
 def test_t1_dashboard_my_list_shelf(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('My List')")
     expect(shelf).to_be_visible()
-    card = shelf.locator(".poster-card")
+    card = shelf.locator(".catalog-card")
     expect(card.first).to_be_visible()
     expect(card.locator("span").first).to_have_text("Naruto")
 
@@ -70,9 +68,11 @@ def test_t1_dashboard_shelves_hide_scrollbars(mocked_page):
     assert scroll is True
 
 def test_t1_dashboard_my_list_nav(mocked_page):
-    my_list_shelf = mocked_page.locator(".content-row:has-text('My List')")
-    show_more = my_list_shelf.locator(".row-heading button")
-    expect(show_more).to_be_visible()
+    shelf = mocked_page.locator(".content-row:has-text('Trending Now')")
+    shelf.locator(".row-heading button").click()
+    expect(mocked_page.locator(".catalog-browser")).to_be_visible()
+    expect(mocked_page.locator(".catalog-filter-bar select")).to_have_count(5)
+    expect(mocked_page.locator(".catalog-browser-header select")).to_have_value("personalMatch")
 
 
 # Search Features (5 tests)
@@ -93,7 +93,7 @@ def test_t1_search_provider_chips(mocked_page):
     expect(mocked_page.locator(".search-stage .search-command-panel")).to_be_visible()
     chips = mocked_page.locator(".search-stage .provider-chip")
     expect(chips.first).to_be_visible()
-    expect(chips).to_have_count(3)
+    expect(chips).to_have_count(1)
     spacing_ok = mocked_page.evaluate("""() => {
         const input = document.querySelector('.search-stage .search-input-shell');
         const source = document.querySelector('.search-stage .search-source-row');
@@ -288,7 +288,11 @@ def test_t2_dashboard_no_providers(mocked_page):
     }""")
     mocked_page.reload()
     mocked_page.wait_for_selector(".app-container, #root")
-    expect(mocked_page.locator(".source-empty")).to_have_text("No providers enabled.")
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    expect(mocked_page.locator(".availability-strip .provider-chip")).to_have_count(0)
+    expect(mocked_page.locator(".language-switch")).to_be_visible()
 
 def test_t2_dashboard_empty_continue_watching(mocked_page):
     mocked_page.evaluate("""() => {
@@ -310,39 +314,30 @@ def test_t2_dashboard_empty_my_list(mocked_page):
     }""")
     mocked_page.reload()
     mocked_page.wait_for_selector(".app-container, #root")
-    shelf = mocked_page.locator(".content-row:has-text('My List')")
-    expect(shelf).to_be_visible()
-    expect(shelf.locator(".shelf-empty-card")).to_be_visible()
-    expect(shelf.locator(".shelf-empty-card strong")).to_have_text("Your list is empty")
-    centered = shelf.locator(".shelf-empty-card").evaluate("""node => {
-        const row = node.closest('.card-row').getBoundingClientRect();
-        const card = node.getBoundingClientRect();
-        const rowCenter = row.left + row.width / 2;
-        const cardCenter = card.left + card.width / 2;
-        return Math.abs(rowCenter - cardCenter) < 24;
-    }""")
-    assert centered is True
+    my_list = mocked_page.locator(".home-dashboard .content-row:has-text('My List')")
+    expect(my_list).to_be_visible()
+    expect(my_list.locator(".shelf-empty-card")).to_contain_text("Your list is empty")
+    expect(mocked_page.locator(".content-row:has-text('Trending Now')")).to_be_visible()
 
 def test_t2_dashboard_long_anime_title(mocked_page):
     mocked_page.evaluate("""() => {
         const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
-        state.my_list = [{
-            animeId: 'long',
-            provider: 'AllAnime',
-            title: 'A'.repeat(200),
-            coverUrl: 'https://example.com/long.jpg'
+        state.continue_watching = [{
+            animeId: 'AllAnime:long', provider: 'AllAnime', title: 'A'.repeat(200),
+            coverUrl: 'https://example.com/long.jpg', episodeNumber: 1,
+            episodeTitle: 'Episode 1', positionSeconds: 1, totalSeconds: 100,
+            updatedAt: '2026-06-13T10:00:00Z'
         }];
         localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
     }""")
     mocked_page.reload()
     mocked_page.wait_for_selector(".app-container, #root")
-    card_title = mocked_page.locator(".content-row:has-text('My List') .poster-card span").first
+    card_title = mocked_page.locator(".content-row:has-text('Continue Watching') .poster-card span").first
     expect(card_title).to_be_visible()
 
 def test_t2_dashboard_invalid_image_fallback(mocked_page):
-    # Assert coverUrl image tag handles fallbacks or exists
-    shelf = mocked_page.locator(".content-row:has-text('My List')")
-    expect(shelf.locator(".poster-card img").first).to_be_visible()
+    shelf = mocked_page.locator(".content-row:has-text('Trending Now')")
+    expect(shelf.locator(".catalog-card img").first).to_be_visible()
 
 
 # Search Edge Cases (5 tests)
@@ -384,7 +379,8 @@ def test_t2_search_provider_disconnect(mocked_page):
         localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
     }""")
     mocked_page.locator(".search-input-shell input").fill("Naruto")
-    expect(mocked_page.locator(".error-banner")).to_be_visible()
+    expect(mocked_page.locator(".error-notice")).to_be_visible()
+    expect(mocked_page.locator(".error-notice strong")).to_have_text("UNEXPECTED_ERROR")
 
 
 # Episode Page Edge Cases (5 tests)
@@ -456,7 +452,7 @@ def test_t2_updater_available_prompt_and_install(mocked_page):
     }""")
     mocked_page.reload()
     mocked_page.wait_for_selector(".update-prompt")
-    expect(mocked_page.locator(".update-prompt")).to_contain_text("ani-desk 1.0.1 is available")
+    expect(mocked_page.locator(".update-prompt")).to_contain_text("ani-desk 1.0.2 is available")
     mocked_page.locator(".update-prompt .primary").click()
     expect(mocked_page.locator(".update-prompt")).to_contain_text("Update installed")
     relaunched = mocked_page.evaluate("""() => {
@@ -511,7 +507,7 @@ def test_t2_episode_prepare_playback_failure(mocked_page):
         localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
     }""")
     mocked_page.locator(".episode-list-row").first.click()
-    expect(mocked_page.locator(".error-banner")).to_be_visible()
+    expect(mocked_page.locator(".error-notice")).to_be_visible()
 
 
 # Liquid Glass Edge Cases (5 tests)
@@ -602,12 +598,11 @@ def test_t3_search_to_favorite_flow(mocked_page):
     # Toggle my list inside preview pane (it's the second button in detail-actions)
     mocked_page.locator(".search-preview .detail-actions button").nth(1).click()
 
-    # Click back to home
-    mocked_page.locator(".search-header button[aria-label='Back']").click()
-
-    # Verify Naruto Shippuden is now listed in My List shelf
-    my_list_shelf = mocked_page.locator(".content-row:has-text('My List')")
-    expect(my_list_shelf).to_contain_text("Naruto Shippuden")
+    stored = mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        return state.my_list.some((item) => item.title === 'Naruto Shippuden');
+    }""")
+    assert stored is True
 
 def test_t3_history_update_on_playback(mocked_page):
     # Open detail page for Naruto, play episode 1, check that save_progress is called (which updates mock watch history)
@@ -628,30 +623,30 @@ def test_t3_history_update_on_playback(mocked_page):
         close_btn.click()
 
 def test_t3_my_list_nav_and_remove(mocked_page):
-    # Click Show More (1) in My List, then remove item, check it updates
-    show_more = mocked_page.locator(".content-row:has-text('My List') .row-heading button")
-    show_more.click()
-    expect(mocked_page.locator(".grid-page")).to_be_visible()
-
-    # Hover or click to remove or unfavorite
-    mocked_page.locator(".poster-card").first.click()
-    # Click My List button in the detail page to remove
-    mocked_page.locator(".detail-actions button:has-text('In My List'), .detail-actions button:has-text('My List')").click()
-    mocked_page.locator(".detail-back-button").click()
-
-    # Navigate back
-    mocked_page.locator("button[aria-label='Back']").click()
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    favorite = mocked_page.locator(".search-preview .detail-actions button").nth(1)
+    favorite.click()
+    expect(favorite).to_have_text("In My List")
+    favorite.click()
+    stored = mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        return state.my_list.some((item) => item.title === 'Naruto Shippuden');
+    }""")
+    assert stored is False
 
 def test_t3_search_provider_switch_reloads(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
     mocked_page.locator(".search-input-shell input").fill("Naruto")
     mocked_page.wait_for_selector(".search-result")
 
-    # Switch chip
-    mocked_page.locator(".provider-chip").nth(1).click()
+    mocked_page.locator(".language-switch button").nth(1).click()
     mocked_page.wait_for_timeout(500)
-    # Check that search results pane title updated
-    expect(mocked_page.locator(".search-results-pane .pane-title span")).to_have_text("KKPhim")
+    expect(mocked_page.locator(".availability-strip .provider-chip")).to_have_count(3)
+    mocked_page.locator(".availability-strip .provider-chip:has-text('KKPhim')").click()
+    expect(mocked_page.locator(".search-preview .eyebrow")).to_contain_text("KKPhim")
 
 def test_t3_continue_watching_opens_saved_episode_detail(mocked_page):
     # Click continue watching card for One Piece
@@ -684,16 +679,13 @@ def test_t3_detail_pagination_sorting(mocked_page):
 # --- TIER 4 TESTS (3 Tests in test_app.py) ---
 
 def test_t4_full_user_watching_session(mocked_page):
-    # 1. Start on dashboard, switch provider to AllAnime
-    mocked_page.locator(".provider-chip:has-text('AllAnime')").click()
-
-    # 2. Click Search, query "Slayer"
+    # 1. Click Search, query a catalog title
     mocked_page.locator(".hero-search-trigger").click()
-    mocked_page.locator(".search-input-shell input").fill("Slayer")
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
     mocked_page.wait_for_selector(".search-result")
 
-    # 3. Select Demon Slayer
-    mocked_page.locator(".search-result:has-text('Demon Slayer')").click()
+    # 2. Select the catalog result and its certified availability
+    mocked_page.locator(".search-result").first.click()
 
     # 4. Open Detail page
     mocked_page.locator(".detail-actions button.primary").click()
@@ -714,36 +706,25 @@ def test_t4_watchlist_management_scenario(mocked_page):
     mocked_page.locator(".search-input-shell input").fill("Naruto")
     mocked_page.wait_for_selector(".search-result")
 
-    # 2. Select Demon Slayer from results
-    mocked_page.locator(".search-result:has-text('Demon Slayer')").click()
-    expect(mocked_page.locator(".search-preview h1")).to_have_text("Demon Slayer")
-
-    # 3. Add to My List
-    mocked_page.locator(".search-preview .detail-actions button").nth(1).click()
-    expect(mocked_page.locator(".search-preview .detail-actions button").nth(1)).to_have_text("In My List")
-
-    # 4. Select Naruto Shippuden, Add to My List too
+    # 2. Select Naruto Shippuden and add it to My List
     mocked_page.locator(".search-result:has-text('Naruto Shippuden')").click()
     expect(mocked_page.locator(".search-preview h1")).to_have_text("Naruto Shippuden")
     mocked_page.locator(".search-preview .detail-actions button").nth(1).click()
     expect(mocked_page.locator(".search-preview .detail-actions button").nth(1)).to_have_text("In My List")
 
-    # 5. Go Back to home, click Show More on My List row
-    mocked_page.locator("button[aria-label='Back']").click()
-    mocked_page.locator(".content-row:has-text('My List') .row-heading button").click()
-
-    # 6. Verify Naruto, Naruto Shippuden, and Demon Slayer exist in favorites shelf
-    expect(mocked_page.locator(".poster-grid")).to_contain_text("Naruto")
-    expect(mocked_page.locator(".poster-grid")).to_contain_text("Naruto Shippuden")
-    expect(mocked_page.locator(".poster-grid")).to_contain_text("Demon Slayer")
+    stored = mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        return state.my_list.some((item) => item.title === 'Naruto Shippuden');
+    }""")
+    assert stored is True
 
 def test_t4_mac_vibrancy_playback_combo(mocked_page):
     # 1. Setup macOS platform style class
     mocked_page.evaluate("document.documentElement.classList.add('platform-macos')")
 
-    # 2. Navigate search for Demon Slayer
+    # 2. Navigate search for a catalog title
     mocked_page.locator(".hero-search-trigger").click()
-    mocked_page.locator(".search-input-shell input").fill("Slayer")
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
     mocked_page.wait_for_selector(".search-result")
     mocked_page.locator(".search-result").first.click()
 

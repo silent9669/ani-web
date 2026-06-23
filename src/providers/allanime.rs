@@ -1,4 +1,4 @@
-use super::{Anime, AnimeProvider, Episode, Language, StreamInfo, Subtitle};
+use super::{parse_episode_number, Anime, AnimeProvider, Episode, Language, StreamInfo, Subtitle};
 use aes::cipher::{KeyIvInit, StreamCipher};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -851,6 +851,11 @@ impl AnimeProvider for AllAnimeProvider {
             }
         }
 
+        results.sort_by(|left, right| {
+            allanime_search_score(query, right)
+                .cmp(&allanime_search_score(query, left))
+                .then_with(|| right.total_episodes.cmp(&left.total_episodes))
+        });
         Ok(results)
     }
 
@@ -909,10 +914,14 @@ impl AnimeProvider for AllAnimeProvider {
         if let Some(episode_list) = show["availableEpisodesDetail"]["sub"].as_array() {
             for (idx, ep) in episode_list.iter().enumerate() {
                 if let Some(ep_num_str) = ep.as_str() {
-                    let ep_number = ep_num_str.parse().unwrap_or((idx + 1) as u32);
+                    let ep_number = parse_episode_number(ep_num_str);
                     episodes.push(Episode {
                         id: format!("{}:{}", anime_id, ep_num_str),
-                        number: ep_number,
+                        number: if ep_number == 0 {
+                            (idx + 1) as u32
+                        } else {
+                            ep_number
+                        },
                         title: None,
                         thumbnail: None,
                     });
@@ -1009,6 +1018,14 @@ impl AnimeProvider for AllAnimeProvider {
             None => response,
         };
 
+        if final_json
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("need_captcha")
+        {
+            anyhow::bail!("PROVIDER_CAPTCHA: NEED_CAPTCHA");
+        }
+
         let mut subtitles = Vec::new();
         let mut selected_candidate = None;
 
@@ -1071,6 +1088,71 @@ impl AnimeProvider for AllAnimeProvider {
             headers: candidate.headers,
         })
     }
+
+    async fn health_check(&self) -> Result<()> {
+        let anime = self
+            .search("One Piece")
+            .await?
+            .into_iter()
+            .next()
+            .context("AllAnime health check found no titles")?;
+        let episode = self
+            .get_episodes(&anime.id)
+            .await?
+            .into_iter()
+            .next_back()
+            .context("AllAnime health check found no episodes")?;
+        self.get_stream_url(&episode.id).await?;
+        Ok(())
+    }
+}
+
+fn normalized_title(value: &str) -> String {
+    value
+        .chars()
+        .filter_map(|character| {
+            if character.is_ascii_alphanumeric() {
+                Some(character.to_ascii_lowercase())
+            } else if character.is_whitespace() {
+                Some(' ')
+            } else {
+                None
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn allanime_search_score(query: &str, anime: &Anime) -> i32 {
+    let query = normalized_title(query);
+    let title = normalized_title(&anime.title);
+    let mut score = if title == query {
+        1000
+    } else if title.starts_with(&query) {
+        650
+    } else if title.contains(&query) {
+        350
+    } else {
+        0
+    };
+
+    let total_episodes = anime.total_episodes.unwrap_or_default();
+    if total_episodes > 100 {
+        score += 250;
+    } else if total_episodes > 20 {
+        score += 80;
+    }
+
+    if !(query.contains("movie") || query.contains("film") || query.contains("special")) {
+        let special_terms = ["movie", "film", "special", "episode of"];
+        if special_terms.iter().any(|term| title.contains(term)) {
+            score -= 180;
+        }
+    }
+
+    score
 }
 
 #[cfg(test)]
@@ -1162,6 +1244,35 @@ https://cdn.example/720/index.m3u8
                 "Mp4",
             ),
             "https://www.mp4upload.com"
+        );
+    }
+
+    #[test]
+    fn search_score_prefers_main_long_running_series() {
+        let special = Anime {
+            id: "special".into(),
+            provider: "AllAnime".into(),
+            title: "One Piece: Episode of Skypiea".into(),
+            cover_url: String::new(),
+            banner_url: None,
+            language: Language::English,
+            total_episodes: Some(1),
+            synopsis: None,
+        };
+        let series = Anime {
+            id: "series".into(),
+            provider: "AllAnime".into(),
+            title: "One Piece".into(),
+            cover_url: String::new(),
+            banner_url: None,
+            language: Language::English,
+            total_episodes: Some(1167),
+            synopsis: None,
+        };
+
+        assert!(
+            allanime_search_score("One Piece", &series)
+                > allanime_search_score("One Piece", &special)
         );
     }
 
