@@ -1,6 +1,6 @@
 [package]
 name = "ani-desk-core"
-version = "1.0.3"
+version = "1.0.5"
 edition = "2021"
 authors = ["silent9669 <dev@silent9669.com>"]
 description = "Core provider, playback, and storage library for ani-desk"
