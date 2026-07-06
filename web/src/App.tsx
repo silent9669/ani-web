@@ -922,13 +922,6 @@ function HomeDashboard({
           },
         }}
       >
-        <motion.div className="home-command-brand" variants={fadeUpVariant}>
-          <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
-          <div>
-            <span>ani-desk</span>
-            <small>Discover. Choose a source. Watch.</small>
-          </div>
-        </motion.div>
         <motion.div className="home-command-actions" variants={fadeUpVariant}>
           <motion.button layoutId="app-search-shell" className="hero-search-trigger home-command-search" onClick={onOpenSearch}>
             <Search size={20} />
@@ -1808,13 +1801,13 @@ function DetailPage({
 
   useEffect(() => {
     if (!highlightEpisodeNumber) return undefined;
-    const frame = window.requestAnimationFrame(() => {
+    const frame = setTimeout(() => {
       const node = episodeListRef.current?.querySelector<HTMLElement>(
         `[data-episode-number="${highlightEpisodeNumber}"]`,
       );
-      node?.scrollIntoView({ block: "center" });
-    });
-    return () => window.cancelAnimationFrame(frame);
+      node?.scrollIntoView({ block: "center", behavior: "instant" });
+    }, 150);
+    return () => clearTimeout(frame);
   }, [highlightEpisodeNumber, safeRangeIndex, latestFirst, episodeQuery]);
 
   const firstEpisode = sortedEpisodes[0];
