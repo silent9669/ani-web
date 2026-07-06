@@ -69,7 +69,7 @@ export const api = {
         catalogId: anime.catalogId ?? null,
         provider: anime.provider,
         title: anime.title,
-        coverUrl: anime.coverUrl,
+        coverUrl: anime.coverUrl ?? "",
       },
     }),
   removeFromMyList: (animeId: string) =>

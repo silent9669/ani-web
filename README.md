@@ -1,52 +1,52 @@
-# ani-desk
+<div align="center">
+  <img src="logo.png" alt="ani-desk logo" width="128" style="border-radius: 24px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <h1>ani-desk</h1>
+  <p>A lightweight desktop anime browser and player built with Tauri, Rust, and React.</p>
+</div>
 
-ani-desk is a lightweight desktop anime browser and player built with Tauri, Rust, and React.
+---
 
-## Features
+## 📸 Demo
 
-- AniList-powered discovery for trending, seasonal, genre, and catalog browsing.
-- Provider-first search for playable anime, OVAs, and films that may not exist in AniList.
-- Compact Netflix-style Home with Continue Watching, Trending Now, and My List.
-- English and Vietnamese provider availability in Search.
-- Certified fallback providers when a source is unavailable or CAPTCHA-gated.
-- Episode chooser for long-running shows with 50-episode ranges, jump, search, resume, latest, and first actions.
-- Built-in HLS/DASH/MP4 playback with subtitles, quality selection, keyboard shortcuts, and saved progress.
-- My List, watch history, resume position, provider health, and structured error codes.
-- Signed in-app update checks for installed releases.
+![ani-desk Demo](docs/demo.png)
 
-## Providers
+## 🚀 Download & Installation
 
-- English: AllAnime, AnimeGG, MovieBox.
-- Vietnamese: KKPhim, OPhim, AnimeVietSub.
+### macOS (Recommended)
 
-AniList is used for discovery and metadata. Playable search also queries providers directly, so Vietnamese films on KKPhim/OPhim can still appear even when AniList has no matching anime record.
+Because of Apple's Gatekeeper, downloading the DMG directly from your browser will result in an "app is damaged" error since it's an ad-hoc signed app. 
 
-Current live certification:
+The easiest and recommended way to install on macOS is via **Homebrew**:
 
-- Working: AnimeGG, KKPhim, OPhim.
-- Health-gated: AllAnime (`PROVIDER_CAPTCHA`), MovieBox (`PROVIDER_UNAVAILABLE`), AnimeVietSub (`STREAM_NOT_FOUND`/AniMapper source unavailable).
+```bash
+brew install --cask silent9669/ani-desk/ani-desk
+```
 
-AllAnime remains visible because ani-cli also tracks it upstream, but ani-desk does not bypass CAPTCHA or access controls.
-
-## Install
-
-Download installers from [GitHub Releases](https://github.com/silent9669/ani-desk/releases).
-
-- macOS 15+ Apple Silicon: DMG or `brew install --cask silent9669/ani-desk/ani-desk`
-- Windows x64: NSIS setup or MSI
-- Linux x64: AppImage, deb, or rpm
-
-Unsigned macOS builds require this once after copying the app to Applications:
-
+*If you manually download the DMG and face the "app is damaged" error, run this in your terminal:*
 ```bash
 xattr -cr /Applications/ani-desk.app
 ```
 
-## Development
+### Windows & Linux
+
+Download the latest installer from the [GitHub Releases](https://github.com/silent9669/ani-desk/releases) page.
+- **Windows**: Download the `.msi` or `.exe` installer.
+- **Linux**: Download the `.AppImage`, `.deb`, or `.rpm`.
+
+---
+
+## ✨ Features
+
+- **Provider-First Search**: Fast and accurate search directly querying your favorite providers, improved by your watch history.
+- **Compact UI**: Netflix-style home page with Trending, Continue Watching, and My List sections.
+- **Built-in Player**: HLS/DASH/MP4 playback with subtitles, quality selection, and saved progress.
+- **Cross-Platform**: Available on macOS, Windows, and Linux.
+
+## 🛠️ Development
+
+To build and run the app locally:
 
 ```bash
 npm ci
 npm run tauri dev
 ```
-
-Build, release, architecture, and troubleshooting notes live in [`docs/`](docs/).
