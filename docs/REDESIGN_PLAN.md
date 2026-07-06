@@ -16,7 +16,7 @@ The previous agent session completed:
 - [x] **macOS DMG polish** — dark/red drag-to-Applications background and `xattr -cr /Applications/ani-desk.app` unsigned-app guidance
 - [x] **AniList catalog Home/Search** — provider-independent discovery with language and availability selection in Search
 - [x] **Provider health and typed errors** — cached health, retry, stable codes, redacted diagnostics, and correlation IDs
-- [x] **English playback certification** — AllAnime is CAPTCHA-gated, but AnimeGG and MovieBox pass live playback certification
+- [x] **English playback certification** — AllAnime is CAPTCHA-gated, AnimeGG passes live playback certification, and MovieBox is health-gated while its signed API returns `miss token`
 - [ ] **Cross-platform release validation** — Windows/Linux bundles and tap brewbot run in GitHub release workflow
 
 ---
@@ -83,7 +83,7 @@ The previous agent session completed:
 
 **Current state**: Desktop bundle release path exists for Apple Silicon macOS 15+ DMG/app, Windows NSIS/MSI, and Linux AppImage/deb/rpm. Homebrew Cask metadata exists at `packaging/homebrew/Casks/ani-desk.rb`, with tap-side files under `packaging/homebrew-tap/`. The local tap checkout for deployment validation is `/Users/phucdang/Documents/homebrew-ani-desk`.
 
-**Provider certification**: AllAnime remains the default English source but is currently CAPTCHA-gated by the upstream API and should surface `PROVIDER_CAPTCHA`. AnimeGG and MovieBox are the certified English playback fallbacks for v1.0.2. KKPhim and OPhim are certified Vietnamese playback providers. AnimeVietSub is integrated through AniMapper but remains intermittent because live stream requests can time out.
+**Provider certification**: AllAnime remains the default English source but is currently CAPTCHA-gated by the upstream API and should surface `PROVIDER_CAPTCHA`. AnimeGG is the certified English playback fallback for v1.0.2. MovieBox is health-gated while its signed API returns `miss token`. KKPhim and OPhim are certified Vietnamese playback providers. AnimeVietSub is integrated through AniMapper but remains unavailable when AniMapper stream source resolution fails.
 
 **Verify**: Launch from Finder/Dock, Start Menu/taskbar, and Linux desktop launcher. The terminal command remains a developer fallback only.
 

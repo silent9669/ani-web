@@ -4,7 +4,8 @@ ani-desk is a lightweight desktop anime browser and player built with Tauri, Rus
 
 ## Features
 
-- AniList-powered discovery for trending, seasonal, genre, and title search.
+- AniList-powered discovery for trending, seasonal, genre, and catalog browsing.
+- Provider-first search for playable anime, OVAs, and films that may not exist in AniList.
 - Compact Netflix-style Home with Continue Watching, Trending Now, and My List.
 - English and Vietnamese provider availability in Search.
 - Certified fallback providers when a source is unavailable or CAPTCHA-gated.
@@ -18,7 +19,14 @@ ani-desk is a lightweight desktop anime browser and player built with Tauri, Rus
 - English: AllAnime, AnimeGG, MovieBox.
 - Vietnamese: KKPhim, OPhim, AnimeVietSub.
 
-AllAnime remains the default English source, but it can report `PROVIDER_CAPTCHA` when AllAnime/AllManga is protected by Cloudflare. ani-desk does not bypass CAPTCHA or access controls.
+AniList is used for discovery and metadata. Playable search also queries providers directly, so Vietnamese films on KKPhim/OPhim can still appear even when AniList has no matching anime record.
+
+Current live certification:
+
+- Working: AnimeGG, KKPhim, OPhim.
+- Health-gated: AllAnime (`PROVIDER_CAPTCHA`), MovieBox (`PROVIDER_UNAVAILABLE`), AnimeVietSub (`STREAM_NOT_FOUND`/AniMapper source unavailable).
+
+AllAnime remains visible because ani-cli also tracks it upstream, but ani-desk does not bypass CAPTCHA or access controls.
 
 ## Install
 

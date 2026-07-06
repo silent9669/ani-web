@@ -178,6 +178,7 @@ def mocked_page(page, vite_server):
                 if (state.catalog_search_error) throw state.catalog_search_error;
                 if (state.search_error) throw state.search_error;
                 if ((args.query || "").toLowerCase().includes("empty")) return [];
+                if ((args.query || "").toLowerCase().includes("cinema")) return [];
                 return Array.from({ length: 16 }, (_, index) => ({
                     catalogId: 3000 + index,
                     title: index === 0 ? "Naruto Shippuden" : `Sample Anime ${index + 1}`,
@@ -262,6 +263,21 @@ def mocked_page(page, vite_server):
                 const query = args.query || "";
                 if (query.toLowerCase().includes("empty")) {
                     return [];
+                }
+                if (query.toLowerCase().includes("cinema")) {
+                    return [
+                        {
+                            id: "cinema-film",
+                            provider: args.source || "KKPhim",
+                            title: "Cinema Film",
+                            coverUrl: "https://example.com/cinema-film.jpg",
+                            bannerUrl: "https://example.com/cinema-banner.jpg",
+                            language: args.source === "AllAnime" ? "English" : "Vietnamese",
+                            totalEpisodes: 1,
+                            synopsis: "A provider-only film result.",
+                            isFavorite: false
+                        }
+                    ];
                 }
                 const baseResults = [
                     {

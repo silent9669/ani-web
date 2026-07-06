@@ -161,25 +161,9 @@ impl UpdateChecker {
             InstallMethod::Binary => {}
         }
 
-        let bin_path = if cfg!(windows) {
-            "ani-desk.exe"
-        } else {
-            "ani-desk"
-        };
-
-        let status = self_update::backends::github::Update::configure()
-            .repo_owner(REPO_OWNER)
-            .repo_name(REPO_NAME)
-            .bin_name("ani-desk")
-            .bin_path_in_archive(bin_path)
-            .show_download_progress(true)
-            .current_version(CURRENT_VERSION)
-            .build()
-            .context("Failed to configure self-update")?
-            .update()
-            .context("Failed to perform self-update")?;
-
-        Ok(status.version().to_string())
+        anyhow::bail!(
+            "ani-desk desktop updates are handled by the signed Tauri updater inside the app"
+        );
     }
 }
 

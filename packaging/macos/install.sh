@@ -15,7 +15,7 @@ fi
 
 ARCH="$(uname -m)"
 if [ "$ARCH" != "arm64" ]; then
-    printf 'ani-desk v1.0.2 supports Apple Silicon Macs only. Detected architecture: %s\n' "$ARCH" >&2
+    printf 'ani-desk v1.0.3 supports Apple Silicon Macs only. Detected architecture: %s\n' "$ARCH" >&2
     exit 1
 fi
 

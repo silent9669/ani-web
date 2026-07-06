@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2] - Unreleased
+## [1.0.3] - Unreleased
+### Changed
+- Search is provider-first again: choose language/provider first, keep the same query while switching providers, and show only the selected provider's results to reduce source confusion.
+- AniList catalog search remains available for discovery/enrichment but no longer mixes catalog titles into the primary provider result list.
+
+## [1.0.2] - 2026-06-23
 ### Added
 - Added AniList-backed Trending, seasonal, genre, and catalog search experiences.
 - Added cached provider health, manual retry, availability resolution, structured error codes, and correlation IDs.
@@ -18,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Removed provider controls from Home; language and provider selection now live in Search.
-- Reworked Search around one AniList result set with English and Vietnamese availability choices.
+- Reworked Search so provider-direct results are shown before AniList catalog matches, allowing provider-only films to remain searchable.
 - Made provider availability concurrent, cached, timeout-bounded, and protected from stale title/language responses.
 - Simplified the player chrome into unframed floating controls, bottom-edge progress, vertical volume, and compact quality/subtitle menus.
 - Changed Home to exactly Continue Watching, Trending Now, and My List; catalog posters now prefill Search.
@@ -26,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tightened provider title matching so availability and certification reject unrelated playable search results.
 
 ### Release Gate
-- v1.0.2 requires at least one certified English provider. Current local certification passes AnimeGG and MovieBox for English, KKPhim/OPhim for Vietnamese, reports AnimeVietSub as intermittent when AniMapper stream requests time out, and reports AllAnime as `PROVIDER_CAPTCHA`.
+- v1.0.2 requires at least one certified English provider. Current local certification passes AnimeGG for English and KKPhim/OPhim for Vietnamese, reports MovieBox as `PROVIDER_UNAVAILABLE` (`miss token`), reports AnimeVietSub as unavailable when AniMapper stream source resolution fails, and reports AllAnime as `PROVIDER_CAPTCHA`.
 
 ## [1.0.1] - 2026-06-14
 ### Added

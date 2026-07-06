@@ -3,9 +3,9 @@
 Local workspace: `/Users/phucdang/Documents/ani-desk`
 Remote target: `https://github.com/silent9669/ani-desk`
 
-## Current Phase: v1.0.2 Release Validation (2026-06-23)
+## Current Phase: v1.0.2 Provider Validation (2026-07-06)
 
-v1.0.2 is implemented locally and provider certification now has working English and Vietnamese playback paths. AllAnime still reports `NEED_CAPTCHA` from the upstream AllAnime/AllManga API and remains visible as the default English source, but it is health-gated with `PROVIDER_CAPTCHA` instead of being offered as playable while blocked. AnimeGG and MovieBox pass English playback certification. KKPhim and OPhim pass Vietnamese playback certification. AnimeVietSub is integrated but currently intermittent in live certification because AniMapper stream requests can time out. HiAnime, AnimeTVN, and Niniyo remain disabled by default until they pass the same live certification gate.
+v1.0.2 is implemented locally and provider certification has one working English playback path plus working Vietnamese playback paths. AniList is discovery/enrichment only; Search also queries providers directly so playable KKPhim/OPhim films can appear even when AniList has no anime catalog match or is rate-limited. AllAnime still reports `NEED_CAPTCHA` from the upstream AllAnime/AllManga API and remains visible as the default English source, but it is health-gated with `PROVIDER_CAPTCHA` instead of being offered as playable while blocked. AnimeGG passes English playback certification. KKPhim and OPhim pass Vietnamese playback certification. MovieBox currently fails health/certification with `PROVIDER_UNAVAILABLE` (`miss token`). AnimeVietSub is integrated through AniMapper but currently fails stream certification with source resolution errors. HiAnime, AnimeTVN, and Niniyo remain disabled by default until they pass the same live certification gate.
 
 ### Latest Changes (UI/UX Refinement Pass)
 
@@ -15,11 +15,11 @@ v1.0.2 is implemented locally and provider certification now has working English
 
 3. **Provider-Independent Discovery** — AniList IDs back catalog records, discovery, and favorites while legacy provider-keyed history remains compatible.
 
-4. **Availability Search** — Search queries AniList once, separates English and Vietnamese choices, resolves providers concurrently with bounded timeouts and stale-response protection, and keeps unavailable titles browsable and saveable.
+4. **Availability Search** — Search queries providers directly first, queries AniList for catalog metadata, separates English and Vietnamese choices, resolves providers concurrently with bounded timeouts and stale-response protection, and keeps unavailable titles browsable and saveable.
 
 5. **Typed Diagnostics** — Provider and player failures use stable error codes, retryability, correlation IDs, redacted diagnostics, Copy, and Retry actions.
 
-6. **Release Certification** — Release CI probes provider search, episodes, stream resolution, and playlist/media retrieval. Publishing is allowed only when at least one English provider passes; the current local gate passes AnimeGG and MovieBox.
+6. **Release Certification** — Release CI probes provider search, episodes, stream resolution, and playlist/media retrieval. Publishing is allowed only when at least one English provider passes; the current local gate passes AnimeGG.
 
 6. **v1.0.1 Enhancements**:
    - **Signed Tauri Updater**: The desktop app checks signed GitHub release metadata, prompts users, downloads the updater artifact, installs it, and relaunches.
@@ -48,13 +48,13 @@ The 2026-06-13 UI/UX pass implemented the compact Netflix-style Home/Search/deta
 - Rust core/provider/database code builds and tests pass
 - Built-in HLS/MP4 playback proxy works
 - AniList catalog discovery and search
-- English playback through certified AnimeGG and MovieBox adapters
-- Vietnamese playback through certified KKPhim and OPhim adapters, with AnimeVietSub available as an intermittent AniMapper-backed source
+- English playback through certified AnimeGG, with AllAnime and MovieBox health-gated when blocked
+- Vietnamese playback through certified KKPhim and OPhim adapters, with AnimeVietSub visible but health-gated while AniMapper source resolution fails
 - AllAnime CAPTCHA detection and explicit unavailable status; uncertified HiAnime remains disabled
 - Dashboard command center with exactly Continue Watching, Trending Now, and My List shelves
 - Paginated catalog browser with genre, season/year, format, status, and sort controls
 - Local personal-match scoring from My List and watch-progress genre affinity
-- Dual-pane search with language selection and title-specific provider availability
+- Dual-pane search with language selection, provider-direct results, and title-specific catalog availability
 - Structured compact diagnostics with stable error codes
 - Detail route with scalable three-panel range rail + active episode list + poster/details panel
 - Signed Tauri updater metadata and in-app update prompt for v1.0.1+

@@ -60,7 +60,7 @@ packaging/
 | `list_sources()` | `Source[]` | Enabled anime providers |
 | `get_discovery()` | `DiscoveryCatalog` | AniList trending and seasonal rails |
 | `get_genre_catalog(genre)` | `CatalogAnime[]` | AniList genre rail |
-| `search_catalog(query)` | `CatalogAnime[]` | Provider-independent AniList search |
+| `search_catalog(query)` | `CatalogAnime[]` | Provider-independent AniList catalog search |
 | `resolve_availability(catalogId, title, language?)` | `ProviderAvailability[]` | Match a catalog title to enabled providers |
 | `list_provider_health()` | `Source[]` | Cached provider capabilities and health |
 | `retry_provider_health()` | `Source[]` | Refresh provider health checks |
@@ -94,10 +94,10 @@ Plus overlays:
 - **Single-file route surface**: Most UI components still live in `App.tsx` so route state, playback state, and motion transitions remain easy to follow.
 - **CSS variables theme**: Dark theme defined in `:root` in `styles.css`. No CSS framework.
 - **framer-motion**: Used for page transitions, card hover, shared search transition, and player enter/exit.
-- **Availability controls**: Search separates English and Vietnamese choices and enables only providers that can play the selected title.
+- **Availability controls**: Search separates English and Vietnamese choices, shows direct provider results before AniList catalog matches, and enables only providers that can play the selected title.
 - **Episode ranges**: For long-running shows (500+ episodes), episodes are chunked into ranges of 50.
 - **Playback proxy**: Axum binds to 127.0.0.1, rewrites HLS/DASH manifests so provider headers are applied safely.
-- **Provider certification**: AllAnime remains visible/default but can be health-gated as `PROVIDER_CAPTCHA`; AnimeGG and MovieBox are certified English fallbacks, KKPhim/OPhim are certified Vietnamese providers, and AnimeVietSub is integrated as an intermittent AniMapper-backed source for v1.0.2.
+- **Provider certification**: AllAnime remains visible/default but can be health-gated as `PROVIDER_CAPTCHA`; AnimeGG is the currently certified English fallback, KKPhim/OPhim are certified Vietnamese providers, MovieBox is health-gated while its signed API returns `miss token`, and AnimeVietSub is visible but health-gated while AniMapper source resolution fails.
 - **Signed updates**: Tauri updater checks GitHub `latest.json`, prompts in-app, installs signed updater artifacts, and relaunches.
 
 ## Verification Commands
