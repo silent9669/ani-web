@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="ani-desk logo" width="128" style="border-radius: 24px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <img src="logo_curved.png" alt="ani-desk logo" width="128">
   <h1>ani-desk</h1>
   <p>A lightweight desktop anime browser and player built with Tauri, Rust, and React.</p>
 </div>

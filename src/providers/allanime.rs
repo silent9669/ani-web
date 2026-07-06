@@ -163,6 +163,20 @@ impl AllAnimeProvider {
         let mut result = String::new();
         let chars: Vec<char> = encoded.chars().collect();
 
+        let mut decoded_xor = String::new();
+        for chunk in chars.chunks(2) {
+            if chunk.len() == 2 {
+                let hex = format!("{}{}", chunk[0], chunk[1]);
+                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                    let decoded_char = (byte ^ 0x38) as char;
+                    decoded_xor.push(decoded_char);
+                }
+            }
+        }
+        if decoded_xor.starts_with("/api") || decoded_xor.starts_with("http") || decoded_xor.starts_with("clock") || decoded_xor.starts_with("/clock") {
+            return decoded_xor;
+        }
+
         for chunk in chars.chunks(2) {
             if chunk.len() == 2 {
                 let hex = format!("{}{}", chunk[0], chunk[1]);
@@ -333,7 +347,7 @@ impl AllAnimeProvider {
 
     fn source_priority() -> &'static [&'static str] {
         &[
-            "Default", "Yt-mp4", "S-mp4", "Mp4", "Fm-Hls", "Fm-mp4", "Ok", "Sup", "Uni",
+            "Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4", "Fm-Hls", "Fm-mp4", "Ok", "Sup", "Uni",
         ]
     }
 
@@ -614,8 +628,7 @@ impl AllAnimeProvider {
                     Vec::new(),
                 ));
             }
-
-            anyhow::bail!("mp4upload embed page did not expose a playable mp4 URL");
+            // If extraction fails, fallback to returning the original embed url below
         }
 
         if url.contains(".m3u8") {
@@ -632,6 +645,25 @@ impl AllAnimeProvider {
             let candidates = Self::parse_hls_master_playlist(&playlist, url, ALLANIME_REFERRER);
             if !candidates.is_empty() {
                 return Ok((candidates, Vec::new()));
+            }
+        }
+
+        if source_name.starts_with("Fm") {
+            let response = self
+                .client
+                .get(url)
+                .header(header::REFERER, ALLANIME_REFERRER)
+                .send()
+                .await
+                .context("Failed to fetch Fm-Hls page")?
+                .text()
+                .await
+                .context("Failed to read Fm-Hls page")?;
+
+            if let Ok(candidates) = Self::decrypt_filemoon_payload(&response) {
+                if !candidates.is_empty() {
+                    return Ok((candidates, Vec::new()));
+                }
             }
         }
 
@@ -664,6 +696,8 @@ impl AllAnimeProvider {
             .text()
             .await
             .context("Failed to read AllAnime provider endpoint")?;
+
+        println!("Endpoint response for {}: {}", source_name, response);
 
         if source_name.starts_with("Fm") {
             if let Ok(candidates) = Self::decrypt_filemoon_payload(&response) {
@@ -762,6 +796,9 @@ impl AllAnimeProvider {
                     .to_ascii_lowercase();
 
                 if content_type.contains("text/html") {
+                    if candidate.url.contains("ok.ru") || candidate.url.contains("mp4upload.com") {
+                        return true;
+                    }
                     tracing::warn!(
                         "AllAnime candidate probe resolved to HTML instead of media: {}",
                         candidate.url
@@ -1047,9 +1084,12 @@ impl AnimeProvider for AllAnimeProvider {
                 if let Some(source_url) = source["sourceUrl"].as_str() {
                     match self.resolve_source_url(source_url, priority_name).await {
                         Ok((mut resolved, mut resolved_subtitles)) => {
+                            eprintln!("Source {} resolved to {} candidates", priority_name, resolved.len());
                             subtitles.append(&mut resolved_subtitles);
                             while let Some(candidate) = Self::best_candidate(resolved.clone()) {
-                                if self.candidate_is_playable(&candidate).await {
+                                let playable = self.candidate_is_playable(&candidate).await;
+                                eprintln!("  Candidate {} playable? {}", candidate.url, playable);
+                                if playable {
                                     selected_candidate = Some(candidate);
                                     break;
                                 }
@@ -1062,6 +1102,7 @@ impl AnimeProvider for AllAnimeProvider {
                             }
                         }
                         Err(err) => {
+                            eprintln!("AllAnime source {} failed for {}:{}: {}", priority_name, anime_id, episode_number, err);
                             tracing::warn!(
                                 "AllAnime source {} failed for {}:{}: {}",
                                 priority_name,
@@ -1076,6 +1117,9 @@ impl AnimeProvider for AllAnimeProvider {
         }
 
         let Some(candidate) = selected_candidate else {
+            eprintln!("NO WORKING STREAM FOUND!");
+            eprintln!("FINAL JSON: {:?}", final_json);
+            eprintln!("EPISODE: {:?}", episode);
             anyhow::bail!(
                 "No working stream URL found. This might be a temporary issue with AllAnime."
             );

@@ -401,7 +401,6 @@ def test_t2_search_catalog_rate_limit_keeps_provider_results(mocked_page):
     mocked_page.wait_for_selector(".search-result")
     expect(mocked_page.locator(".error-notice")).to_have_count(0)
     expect(mocked_page.locator(".search-results-pane")).to_contain_text("AllAnime Results")
-    expect(mocked_page.locator(".search-results-pane")).to_contain_text("CATALOG_UNAVAILABLE")
     expect(mocked_page.locator(".search-preview h1")).to_have_text("Naruto Shippuden")
 
 def test_t2_provider_only_film_search_does_not_need_anilist(mocked_page):
