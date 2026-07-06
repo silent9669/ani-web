@@ -119,7 +119,6 @@ function App() {
     const cleanQuery = query.trim();
     setAvailability([]);
     setSearchSelection(null);
-    setSelectedSource(null);
     if (cleanQuery.length < 2) {
       setCatalogResults([]);
       setProviderResults([]);
@@ -131,7 +130,15 @@ function App() {
     const handle = window.setTimeout(() => void searchCatalog(cleanQuery), 320);
 
     return () => window.clearTimeout(handle);
-  }, [query, route, languageGroup]);
+  }, [query, route, languageGroup, selectedSource?.name]);
+
+  useEffect(() => {
+    if (!sources.length) return;
+    const current = selectedSource;
+    if (current?.languageGroup === languageGroup) return;
+    const nextSource = firstSearchableSource(sources, languageGroup);
+    if (nextSource) selectSource(nextSource);
+  }, [sources, languageGroup, selectedSource?.name]);
 
   useEffect(() => {
     if (route !== "search" || !catalogSelection) return;
@@ -264,9 +271,10 @@ function App() {
     if (route !== "search") navigate("search");
   }
 
-  async function searchCatalog(nextQuery = query) {
+  async function searchCatalog(nextQuery = query, sourceOverride?: Source | null) {
     const cleanQuery = nextQuery.trim();
     const generation = ++catalogSearchGenerationRef.current;
+    const activeSource = sourceOverride ?? selectedSource;
     if (cleanQuery.length < 2) {
       setCatalogResults([]);
       setProviderResults([]);
@@ -281,26 +289,29 @@ function App() {
     setCatalogSearchError(null);
     setAvailability([]);
     setSearchSelection(null);
-    setSelectedSource(null);
     try {
-      const [catalogOutcome, directItems] = await Promise.all([
+      const [catalogOutcome, providerOutcome] = await Promise.all([
         loadCatalogSearchResults(cleanQuery),
-        searchProviderResults(cleanQuery, languageGroup),
+        activeSource
+          ? searchProviderResults(cleanQuery, activeSource)
+              .then((items) => ({ ok: true as const, items }))
+              .catch((err) => ({ ok: false as const, error: toAppError(err, "provider-search") }))
+          : Promise.resolve({ ok: true as const, items: [] }),
       ]);
       if (generation !== catalogSearchGenerationRef.current) return;
+      const directItems = providerOutcome.ok ? providerOutcome.items : [];
       setProviderResults(directItems);
+      if (!providerOutcome.ok) {
+        setError(providerOutcome.error);
+      }
       if (catalogOutcome.ok) {
         const items = catalogOutcome.items;
         setCatalogResults(items);
-        setCatalogSelection((current) => {
-          if (current && items.some((item) => item.catalogId === current.catalogId)) {
-            return current;
-          }
-          return items[0] ?? null;
-        });
-        if (!items.length && directItems.length) {
+        if (directItems.length) {
+          setCatalogSelection(null);
           setSearchSelection(directItems[0]);
-          setSelectedSource(sources.find((source) => source.name === directItems[0].provider) ?? null);
+        } else {
+          setCatalogSelection(null);
         }
       } else {
         setCatalogResults([]);
@@ -308,7 +319,6 @@ function App() {
         setCatalogSearchError(catalogOutcome.error);
         if (directItems.length) {
           setSearchSelection(directItems[0]);
-          setSelectedSource(sources.find((source) => source.name === directItems[0].provider) ?? null);
         } else {
           setSearchSelection(null);
           setError(catalogOutcome.error);
@@ -353,27 +363,17 @@ function App() {
     }
   }
 
-  async function searchProviderResults(queryText: string, group: "english" | "vietnamese") {
-    const searchable = sources.filter(
-      (source) =>
-        source.languageGroup === group &&
-        source.status !== "unavailable" &&
-        source.capabilities.search,
-    );
-    const batches = await Promise.allSettled(
-      searchable.map(async (source) => {
-        const items = await api.searchSource(source.name, queryText);
-        return items.map((item) => ({
-          ...item,
-          language: item.language || source.language,
-          isFavorite: myList.some((favorite) => favorite.animeId === animeKey(item.provider, item.id)),
-        }));
-      }),
-    );
+  async function searchProviderResults(queryText: string, source: Source) {
+    if (source.status === "unavailable" || !source.capabilities.search) return [];
+    const items = await api.searchSource(source.name, queryText);
 
     const seen = new Set<string>();
-    return batches
-      .flatMap((batch) => (batch.status === "fulfilled" ? batch.value : []))
+    return items
+      .map((item) => ({
+        ...item,
+        language: item.language || source.language,
+        isFavorite: myList.some((favorite) => favorite.animeId === animeKey(item.provider, item.id)),
+      }))
       .filter((item) => {
         const key = animeKey(item.provider, item.id);
         if (seen.has(key)) return false;
@@ -391,6 +391,7 @@ function App() {
   }
 
   function selectProviderSource(source: Source) {
+    selectSource(source);
     const direct = providerResults.find((anime) => anime.provider === source.name);
     if (direct) {
       selectProviderResult(direct);
@@ -399,6 +400,17 @@ function App() {
     const option = availability.find((item) => item.provider === source.name);
     if (option?.anime) {
       void selectCatalogProvider(option);
+      return;
+    }
+    if (query.trim().length >= 2) void searchCatalog(query, source);
+  }
+
+  function selectSearchLanguage(group: "english" | "vietnamese") {
+    setLanguageGroup(group);
+    const nextSource = firstSearchableSource(sources, group);
+    if (nextSource) {
+      selectSource(nextSource);
+      if (query.trim().length >= 2) void searchCatalog(query, nextSource);
     }
   }
 
@@ -686,11 +698,12 @@ function App() {
               sources={sources}
               languageGroup={languageGroup}
               availability={availability}
+              selectedSource={selectedSource}
               selectedCatalog={catalogSelection}
               selectedAnime={searchSelection}
               onQueryChange={setQuery}
               onSearch={() => void searchCatalog()}
-              onLanguageChange={setLanguageGroup}
+              onLanguageChange={selectSearchLanguage}
               onProviderSelect={(option) => void selectCatalogProvider(option)}
               onProviderSourceSelect={selectProviderSource}
               onSelectProviderResult={selectProviderResult}
@@ -1238,6 +1251,7 @@ function SearchStage({
   sources,
   languageGroup,
   availability,
+  selectedSource,
   selectedCatalog,
   selectedAnime,
   onQueryChange,
@@ -1259,6 +1273,7 @@ function SearchStage({
   sources: Source[];
   languageGroup: "english" | "vietnamese";
   availability: ProviderAvailability[];
+  selectedSource: Source | null;
   selectedCatalog: CatalogAnime | null;
   selectedAnime: Anime | null;
   onQueryChange: (query: string) => void;
@@ -1315,7 +1330,7 @@ function SearchStage({
             <input
               ref={inputRef}
               value={query}
-              placeholder="Search anime..."
+              placeholder="Search anime, films, OVAs..."
               onChange={(event) => onQueryChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") onSearch();
@@ -1333,18 +1348,19 @@ function SearchStage({
             {languageSources.map((source) => {
               const option = availability.find((item) => item.provider === source.name);
               const hasDirectResult = providerResults.some((anime) => anime.provider === source.name);
-              const enabled = source.status !== "unavailable" && (option?.status === "available" || hasDirectResult);
+              const enabled = source.status !== "unavailable" && source.capabilities.search;
+              const isActive = selectedSource?.name === source.name || selectedAnime?.provider === source.name;
               return (
                 <button
                   key={source.name}
-                  className={selectedAnime?.provider === source.name ? "provider-chip active" : "provider-chip"}
+                  className={isActive ? "provider-chip active" : "provider-chip"}
                   disabled={!enabled}
                   title={source.failureCode || option?.failureCode || undefined}
-                  onClick={() => (option?.status === "available" ? onProviderSelect(option) : onProviderSourceSelect(source))}
+                  onClick={() => onProviderSourceSelect(source)}
                 >
                   <i className={`health-dot ${source.status}`} />
                   <strong>{source.name}</strong>
-                  <span>{enabled ? (hasDirectResult && !option ? "Search" : "Ready") : source.failureCode === "PROVIDER_CAPTCHA" ? "Captcha" : "Unavailable"}</span>
+                  <span>{enabled ? (hasDirectResult ? "Results" : "Search") : source.failureCode === "PROVIDER_CAPTCHA" ? "Captcha" : "Unavailable"}</span>
                 </button>
               );
             })}
@@ -1356,7 +1372,7 @@ function SearchStage({
         <div className="search-layout">
           <aside className="search-results-pane">
             <div className="pane-title">
-              <span>Provider Results</span>
+              <span>{selectedSource ? `${selectedSource.name} Results` : "Choose Provider"}</span>
               <strong>{providerResults.length}</strong>
             </div>
             {providerResults.map((anime, index) => {
@@ -1382,45 +1398,19 @@ function SearchStage({
                 </motion.button>
               );
             })}
-            <div className="pane-title">
-              <span>AniList Catalog</span>
-              <strong>{results.length}</strong>
-            </div>
             {catalogError && (
               <div className="inline-status">
                 <strong>{catalogError.code}</strong>
                 <span>{catalogError.message}</span>
               </div>
             )}
-            {loading && !results.length ? (
+            {loading && !providerResults.length ? (
               Array.from({ length: 9 }).map((_, index) => <div className="result-skeleton" key={index} />)
-            ) : results.length ? (
-              results.map((anime, index) => {
-                const active = selectedCatalog?.catalogId === anime.catalogId;
-                return (
-                  <motion.button
-                    className={active ? "search-result active" : "search-result"}
-                    key={anime.catalogId}
-                    onClick={() => onSelectCatalog(anime)}
-                    initial={{ opacity: 0, x: -12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{
-                      type: "spring",
-                      stiffness: 380,
-                      damping: 30,
-                      delay: Math.min(index * 0.012, 0.12)
-                    }}
-                    whileHover={{ x: 2, y: -1 }}
-                  >
-                    <img src={anime.coverUrl || LOGO_SRC} alt="" />
-                    <span>{anime.title}</span>
-                    <small>{[anime.format, anime.seasonYear].filter(Boolean).join(" / ") || "Anime"}</small>
-                  </motion.button>
-                );
-              })
             ) : (
               !providerResults.length && <EmptyPanel title={query.trim().length < 2 ? "ani-desk" : "No results"} compact />
             )}
+
+
           </aside>
 
           <AnimatePresence mode="wait">
@@ -2521,6 +2511,14 @@ function catalogOnlyAnime(catalog: CatalogAnime): Anime {
     synopsis: catalog.description,
     isFavorite: false,
   };
+}
+
+function firstSearchableSource(sources: Source[], group: "english" | "vietnamese") {
+  return (
+    sources.find((source) => source.languageGroup === group && source.status !== "unavailable" && source.capabilities.search) ??
+    sources.find((source) => source.languageGroup === group) ??
+    null
+  );
 }
 
 function plainDescription(value?: string | null): string {
