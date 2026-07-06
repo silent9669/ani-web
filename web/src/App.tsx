@@ -290,39 +290,26 @@ function App() {
     setAvailability([]);
     setSearchSelection(null);
     try {
-      const [catalogOutcome, providerOutcome] = await Promise.all([
-        loadCatalogSearchResults(cleanQuery),
-        activeSource
-          ? searchProviderResults(cleanQuery, activeSource)
-              .then((items) => ({ ok: true as const, items }))
-              .catch((err) => ({ ok: false as const, error: toAppError(err, "provider-search") }))
-          : Promise.resolve({ ok: true as const, items: [] }),
-      ]);
+      const providerOutcome = activeSource
+        ? await searchProviderResults(cleanQuery, activeSource)
+            .then((items) => ({ ok: true as const, items }))
+            .catch((err) => ({ ok: false as const, error: toAppError(err, "provider-search") }))
+        : { ok: true as const, items: [] };
+
+      const catalogOutcome: { ok: true; items: CatalogAnime[] } | { ok: false; error: AppError } = { ok: true as const, items: [] as CatalogAnime[] };
       if (generation !== catalogSearchGenerationRef.current) return;
       const directItems = providerOutcome.ok ? providerOutcome.items : [];
       setProviderResults(directItems);
       if (!providerOutcome.ok) {
         setError(providerOutcome.error);
       }
-      if (catalogOutcome.ok) {
-        const items = catalogOutcome.items;
-        setCatalogResults(items);
-        if (directItems.length) {
-          setCatalogSelection(null);
-          setSearchSelection(directItems[0]);
-        } else {
-          setCatalogSelection(null);
-        }
-      } else {
-        setCatalogResults([]);
+      
+      setCatalogResults([]);
+      if (directItems.length) {
         setCatalogSelection(null);
-        setCatalogSearchError(catalogOutcome.error);
-        if (directItems.length) {
-          setSearchSelection(directItems[0]);
-        } else {
-          setSearchSelection(null);
-          setError(catalogOutcome.error);
-        }
+        setSearchSelection(directItems[0]);
+      } else {
+        setCatalogSelection(null);
       }
     } finally {
       if (generation === catalogSearchGenerationRef.current) setLoading(false);
@@ -368,7 +355,7 @@ function App() {
     const items = await api.searchSource(source.name, queryText);
 
     const seen = new Set<string>();
-    return items
+    const processed = items
       .map((item) => ({
         ...item,
         language: item.language || source.language,
@@ -379,8 +366,22 @@ function App() {
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
-      })
-      .slice(0, 36);
+      });
+
+    // Increase algorithm matching by user's history
+    const historyTitles = continueWatching.map(h => h.title.toLowerCase());
+    
+    return processed.sort((a, b) => {
+      const aTitle = a.title.toLowerCase();
+      const bTitle = b.title.toLowerCase();
+      
+      const aInHistory = historyTitles.some(t => aTitle.includes(t) || t.includes(aTitle));
+      const bInHistory = historyTitles.some(t => bTitle.includes(t) || t.includes(bTitle));
+      
+      if (aInHistory && !bInHistory) return -1;
+      if (!aInHistory && bInHistory) return 1;
+      return 0;
+    }).slice(0, 36);
   }
 
   function selectProviderResult(anime: Anime) {
