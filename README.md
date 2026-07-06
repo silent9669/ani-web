@@ -6,10 +6,6 @@
 
 ---
 
-## 📸 Demo
-
-![ani-desk Demo](docs/demo.png)
-
 ## 🚀 Download & Installation
 
 ### macOS (Recommended)
@@ -41,12 +37,3 @@ Download the latest installer from the [GitHub Releases](https://github.com/sile
 - **Compact UI**: Netflix-style home page with Trending, Continue Watching, and My List sections.
 - **Built-in Player**: HLS/DASH/MP4 playback with subtitles, quality selection, and saved progress.
 - **Cross-Platform**: Available on macOS, Windows, and Linux.
-
-## 🛠️ Development
-
-To build and run the app locally:
-
-```bash
-npm ci
-npm run tauri dev
-```
