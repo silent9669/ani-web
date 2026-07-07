@@ -47,3 +47,13 @@ daytona.yaml
 .obsidian/
 GEMINI.md
 ani-cli-temp/
+
+# Development scratch files
+create_curved_logo.py
+create_dmg_bg.py
+task.md
+test_decode
+test_decode.rs
+tests_providers.rs
+src/providers/test_allanime_decode
+src/providers/test_allanime_decode.rs

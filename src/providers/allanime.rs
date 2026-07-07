@@ -173,7 +173,11 @@ impl AllAnimeProvider {
                 }
             }
         }
-        if decoded_xor.starts_with("/api") || decoded_xor.starts_with("http") || decoded_xor.starts_with("clock") || decoded_xor.starts_with("/clock") {
+        if decoded_xor.starts_with("/api")
+            || decoded_xor.starts_with("http")
+            || decoded_xor.starts_with("clock")
+            || decoded_xor.starts_with("/clock")
+        {
             return decoded_xor;
         }
 
@@ -697,8 +701,6 @@ impl AllAnimeProvider {
             .await
             .context("Failed to read AllAnime provider endpoint")?;
 
-        println!("Endpoint response for {}: {}", source_name, response);
-
         if source_name.starts_with("Fm") {
             if let Ok(candidates) = Self::decrypt_filemoon_payload(&response) {
                 if !candidates.is_empty() {
@@ -1084,12 +1086,9 @@ impl AnimeProvider for AllAnimeProvider {
                 if let Some(source_url) = source["sourceUrl"].as_str() {
                     match self.resolve_source_url(source_url, priority_name).await {
                         Ok((mut resolved, mut resolved_subtitles)) => {
-                            eprintln!("Source {} resolved to {} candidates", priority_name, resolved.len());
                             subtitles.append(&mut resolved_subtitles);
                             while let Some(candidate) = Self::best_candidate(resolved.clone()) {
-                                let playable = self.candidate_is_playable(&candidate).await;
-                                eprintln!("  Candidate {} playable? {}", candidate.url, playable);
-                                if playable {
+                                if self.candidate_is_playable(&candidate).await {
                                     selected_candidate = Some(candidate);
                                     break;
                                 }
@@ -1102,7 +1101,6 @@ impl AnimeProvider for AllAnimeProvider {
                             }
                         }
                         Err(err) => {
-                            eprintln!("AllAnime source {} failed for {}:{}: {}", priority_name, anime_id, episode_number, err);
                             tracing::warn!(
                                 "AllAnime source {} failed for {}:{}: {}",
                                 priority_name,
@@ -1117,9 +1115,6 @@ impl AnimeProvider for AllAnimeProvider {
         }
 
         let Some(candidate) = selected_candidate else {
-            eprintln!("NO WORKING STREAM FOUND!");
-            eprintln!("FINAL JSON: {:?}", final_json);
-            eprintln!("EPISODE: {:?}", episode);
             anyhow::bail!(
                 "No working stream URL found. This might be a temporary issue with AllAnime."
             );
@@ -1274,7 +1269,10 @@ https://cdn.example/720/index.m3u8
     fn test_source_priority_matches_latest_ani_cli_active_sources() {
         let priority = AllAnimeProvider::source_priority();
 
-        assert_eq!(&priority[..5], ["Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4"]);
+        assert_eq!(
+            &priority[..5],
+            ["Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4"]
+        );
         assert!(priority.contains(&"Fm-Hls"));
         assert!(priority.contains(&"Fm-mp4"));
     }
@@ -1412,8 +1410,6 @@ https://cdn.example/720/index.m3u8
             .await
             .expect("stream should resolve");
 
-        eprintln!("AllAnime live stream URL: {}", stream.video_url);
-        eprintln!("AllAnime live headers: {:?}", stream.headers);
         assert!(stream.video_url.starts_with("http"));
     }
 

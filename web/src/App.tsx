@@ -922,6 +922,13 @@ function HomeDashboard({
           },
         }}
       >
+        <motion.div className="home-command-brand" variants={fadeUpVariant}>
+          <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
+          <div>
+            <span>ani-desk</span>
+            <small>Discover. Choose a source. Watch.</small>
+          </div>
+        </motion.div>
         <motion.div className="home-command-actions" variants={fadeUpVariant}>
           <motion.button layoutId="app-search-shell" className="hero-search-trigger home-command-search" onClick={onOpenSearch}>
             <Search size={20} />
