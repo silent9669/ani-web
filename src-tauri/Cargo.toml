@@ -1,6 +1,6 @@
 [package]
 name = "ani-desk"
-version = "1.0.4"
+version = "1.0.5"
 description = "Netflix-inspired desktop app for anime streaming"
 authors = ["silent9669 <dev@silent9669.com>"]
 edition = "2021"
