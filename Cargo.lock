@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "ani-desk"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ani-desk-core",
  "anyhow",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "ani-desk-core"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "aes",
  "anyhow",
