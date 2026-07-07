@@ -1212,7 +1212,7 @@ main {
   align-items: center;
   gap: 0.78rem;
   min-width: 0;
-  margin-top: 1.25rem;
+  margin-top: 2.5rem;
   padding-top: 0.18rem;
   padding-left: 3.3rem;
 }
@@ -1851,7 +1851,7 @@ main {
   width: 100%;
   min-height: 64px;
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr) auto auto;
+  grid-template-columns: 86px minmax(0, 1fr) max-content auto;
   align-items: center;
   gap: 0.78rem;
   overflow: hidden;
@@ -2293,7 +2293,7 @@ main {
   }
 
   .episode-list-row {
-    grid-template-columns: 72px minmax(0, 1fr) auto;
+    grid-template-columns: 72px minmax(0, 1fr) max-content auto;
   }
 
   .episode-thumb {

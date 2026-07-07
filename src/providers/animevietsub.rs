@@ -1,16 +1,16 @@
-use super::{Anime, AnimeProvider, Episode, Language, StreamInfo};
+use super::{Anime, AnimeProvider, Episode, Language, StreamInfo, Subtitle};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
-use serde_json::Value;
+use reqwest::header::{self, HeaderMap};
 use std::collections::HashMap;
 use std::time::Duration;
 
-const API: &str = "https://api.animapper.net/api/v1";
+const OPHIM_API: &str = "https://ophim1.com/v1/api";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct AnimeVietSubProvider {
     client: reqwest::Client,
     name: &'static str,
-    provider_code: &'static str,
 }
 
 impl Default for AnimeVietSubProvider {
@@ -24,38 +24,36 @@ impl AnimeVietSubProvider {
         Self::for_provider("AnimeVietSub", "ANIMEVIETSUB")
     }
 
-    pub fn for_provider(name: &'static str, provider_code: &'static str) -> Self {
+    pub fn for_provider(name: &'static str, _provider_code: &'static str) -> Self {
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("ani-desk/1.0.2"));
-        Self {
-            client: reqwest::Client::builder()
-                .default_headers(headers)
-                .timeout(Duration::from_secs(15))
-                .build()
-                .expect("failed to build AniMapper client"),
-            name,
-            provider_code,
-        }
+        headers.insert(header::USER_AGENT, header::HeaderValue::from_static(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ));
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .expect("Failed to create HTTP client");
+
+        Self { client, name }
     }
 
-    async fn json(&self, request: reqwest::RequestBuilder, operation: &str) -> Result<Value> {
-        let response = request
-            .send()
-            .await
-            .with_context(|| format!("{operation} request failed"))?;
-        let status = response.status();
-        let body: Value = response
-            .json()
-            .await
-            .with_context(|| format!("{operation} returned invalid JSON"))?;
-        if !status.is_success() {
-            let code = body["code"].as_str().unwrap_or("ANIMAPPER_ERROR");
-            let message = body["message"]
-                .as_str()
-                .unwrap_or("AniMapper request failed");
-            anyhow::bail!("{code}: {message}");
+    fn absolute_image_url(cdn: &str, value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
         }
-        Ok(body)
+
+        if trimmed.starts_with("http") {
+            Some(trimmed.to_string())
+        } else {
+            Some(format!(
+                "{}/uploads/movies/{}",
+                cdn.trim_end_matches('/'),
+                trimmed.trim_start_matches('/')
+            ))
+        }
     }
 }
 
@@ -70,235 +68,262 @@ impl AnimeProvider for AnimeVietSubProvider {
     }
 
     fn supported_languages(&self) -> Vec<String> {
-        vec!["vi".into()]
+        vec!["vi".to_string()]
     }
 
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
-        let body = self
-            .json(
-                self.client.get(format!("{API}/search")).query(&[
-                    ("title", query),
-                    ("mediaType", "ANIME"),
-                    ("limit", "20"),
-                ]),
-                &format!("{} search", self.name),
-            )
-            .await?;
-        let mut results = body["results"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|item| {
-                let id = item["id"].as_i64()?.to_string();
-                let title = item["titles"]["vi"]
-                    .as_str()
-                    .or_else(|| item["titles"]["main"].as_str())
-                    .or_else(|| item["titles"]["user-preferred"].as_str())
-                    .or_else(|| item["titles"]["en"].as_str())?
-                    .to_string();
-                let cover = item["images"]["coverXl"]
-                    .as_str()
-                    .or_else(|| item["images"]["coverLg"].as_str())?
-                    .to_string();
-                let score = search_score(query, item);
-                Some((
-                    score,
-                    Anime {
-                        id,
-                        provider: self.name.into(),
-                        title,
-                        cover_url: cover,
-                        banner_url: item["images"]["bannerUrl"].as_str().map(str::to_string),
-                        language: Language::Vietnamese,
-                        total_episodes: None,
-                        synopsis: None,
-                    },
-                ))
-            })
-            .collect::<Vec<_>>();
-        results.sort_by_key(|item| std::cmp::Reverse(item.0));
-        Ok(results.into_iter().map(|(_, anime)| anime).collect())
+        let search_url = format!("{}/tim-kiem", OPHIM_API);
+
+        let response: serde_json::Value = self
+            .client
+            .get(&search_url)
+            .query(&[("keyword", query), ("limit", "40")])
+            .send()
+            .await
+            .with_context(|| format!("Failed to search {}", self.name))?
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse {} search response", self.name))?;
+
+        let mut results = Vec::new();
+
+        if let Some(data) = response.get("data") {
+            if let Some(items) = data.get("items").and_then(|i| i.as_array()) {
+                let mut items = items.clone();
+                items.sort_by(|a, b| {
+                    let a_type = a["type"].as_str().unwrap_or("");
+                    let b_type = b["type"].as_str().unwrap_or("");
+                    let a_priority = if a_type == "hoathinh" { 0 } else { 1 };
+                    let b_priority = if b_type == "hoathinh" { 0 } else { 1 };
+                    a_priority.cmp(&b_priority)
+                });
+
+                for item in items {
+                    let slug = item["slug"].as_str().unwrap_or_default().to_string();
+                    let name = item["name"].as_str().unwrap_or_default().to_string();
+                    let thumb = item["thumb_url"].as_str().unwrap_or_default().to_string();
+                    let poster = item["poster_url"].as_str().unwrap_or_default().to_string();
+
+                    let cdn = response["data"]["APP_DOMAIN_CDN_IMAGE"]
+                        .as_str()
+                        .unwrap_or("https://img.ophim.live");
+
+                    let image_url = if poster.starts_with("http") {
+                        poster
+                    } else if thumb.starts_with("http") {
+                        thumb
+                    } else {
+                        format!("{}/uploads/movies/{}", cdn.trim_end_matches('/'), poster)
+                    };
+
+                    if !slug.is_empty() && !name.is_empty() {
+                        results.push(Anime {
+                            id: slug,
+                            provider: self.name.to_string(),
+                            title: name,
+                            cover_url: image_url,
+                            banner_url: None,
+                            language: Language::Vietnamese,
+                            total_episodes: None,
+                            synopsis: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn get_anime_details(&self, anime_id: &str) -> Result<Option<Anime>> {
+        let detail_url = format!("{}/phim/{}", OPHIM_API, anime_id);
+        let response: serde_json::Value = self
+            .client
+            .get(&detail_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to get {} details", self.name))?
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse {} details response", self.name))?;
+
+        let Some(data) = response.get("data") else {
+            return Ok(None);
+        };
+        let Some(item) = data.get("item") else {
+            return Ok(None);
+        };
+
+        let title = item["name"].as_str().unwrap_or_default().to_string();
+        if title.is_empty() {
+            return Ok(None);
+        }
+
+        let cdn = data["APP_DOMAIN_CDN_IMAGE"]
+            .as_str()
+            .unwrap_or("https://img.ophim.live");
+        let poster_url = item["poster_url"].as_str().unwrap_or_default();
+        let thumb_url = item["thumb_url"].as_str().unwrap_or_default();
+        let cover_url = Self::absolute_image_url(cdn, poster_url)
+            .or_else(|| Self::absolute_image_url(cdn, thumb_url))
+            .unwrap_or_default();
+        let banner_url = Self::absolute_image_url(cdn, thumb_url)
+            .or_else(|| Self::absolute_image_url(cdn, poster_url));
+        let total_episodes = item["episode_total"]
+            .as_str()
+            .and_then(|e| e.parse::<u32>().ok());
+
+        Ok(Some(Anime {
+            id: anime_id.to_string(),
+            provider: self.name.to_string(),
+            title,
+            cover_url,
+            banner_url,
+            language: Language::Vietnamese,
+            total_episodes,
+            synopsis: item["content"].as_str().map(|s| s.to_string()),
+        }))
     }
 
     async fn get_episodes(&self, anime_id: &str) -> Result<Vec<Episode>> {
-        let body = self
-            .json(
-                self.client.get(format!("{API}/stream/episodes")).query(&[
-                    ("id", anime_id),
-                    ("provider", self.provider_code),
-                    ("limit", "0"),
-                ]),
-                &format!("{} episodes", self.name),
-            )
-            .await?;
-        Ok(body["episodes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|episode| {
-                let raw_number = episode["episodeNumber"].as_str()?;
-                let digits = raw_number.split('_').next()?.trim_start_matches('0');
-                let number = if digits.is_empty() {
-                    0
-                } else {
-                    digits.parse::<u32>().ok()?
-                };
-                if number == 0 {
-                    return None;
+        let detail_url = format!("{}/phim/{}", OPHIM_API, anime_id);
+
+        let response: serde_json::Value = self
+            .client
+            .get(&detail_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to get {} episodes", self.name))?
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse {} episodes response", self.name))?;
+
+        let mut episodes = Vec::new();
+
+        if let Some(data) = response.get("data") {
+            if let Some(item) = data.get("item") {
+                if let Some(episode_list) = item.get("episodes").and_then(|e| e.as_array()) {
+                    for server in episode_list {
+                        if let Some(server_data) =
+                            server.get("server_data").and_then(|s| s.as_array())
+                        {
+                            for ep in server_data {
+                                let name = ep["name"].as_str().unwrap_or("");
+                                let ep_num = super::parse_episode_number(name);
+
+                                if ep_num > 0 {
+                                    episodes.push(Episode {
+                                        id: format!("{}:{}", anime_id, ep_num),
+                                        number: ep_num,
+                                        title: Some(
+                                            ep["filename"].as_str().unwrap_or("").to_string(),
+                                        ),
+                                        thumbnail: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
-                Some(Episode {
-                    id: episode["episodeId"].as_str()?.to_string(),
-                    number,
-                    title: Some(format!("Episode {raw_number}")),
-                    thumbnail: None,
-                })
-            })
-            .collect())
+            }
+        }
+
+        episodes.sort_by_key(|a| a.number);
+        episodes.dedup_by(|a, b| a.number == b.number);
+
+        Ok(episodes)
     }
 
     async fn get_stream_url(&self, episode_id: &str) -> Result<StreamInfo> {
-        let body = self
-            .json(
-                self.client.get(format!("{API}/stream/source")).query(&[
-                    ("episodeData", episode_id),
-                    ("provider", self.provider_code),
-                ]),
-                &format!("{} stream", self.name),
-            )
-            .await?;
-        if body["type"].as_str() != Some("HLS") {
-            anyhow::bail!(
-                "STREAM_UNSUPPORTED: {} returned a non-HLS stream",
-                self.name
-            );
+        let parts: Vec<&str> = episode_id.split(':').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid episode_id format. Expected 'anime_slug:episode_number'");
         }
-        let raw_video_url = body["url"]
-            .as_str()
-            .with_context(|| format!("STREAM_NOT_FOUND: {} returned no stream URL", self.name))?;
-        let video_url = reqwest::Url::parse(raw_video_url)
-            .or_else(|_| reqwest::Url::parse(&format!("{API}/"))?.join(raw_video_url))
-            .with_context(|| {
-                format!(
-                    "STREAM_NOT_FOUND: {} returned an invalid stream URL",
-                    self.name
-                )
-            })?
-            .to_string();
-        let mut headers = HashMap::new();
-        if let Some(values) = body["proxyHeaders"].as_object() {
-            for (key, value) in values {
-                if let Some(value) = value.as_str() {
-                    headers.insert(key.clone(), value.to_string());
+
+        let anime_slug = parts[0];
+        let episode_number = parts[1];
+
+        let detail_url = format!("{}/phim/{}", OPHIM_API, anime_slug);
+
+        let response: serde_json::Value = self
+            .client
+            .get(&detail_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to get {} stream", self.name))?
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse {} stream response", self.name))?;
+
+        let mut stream_url = String::new();
+        let mut subtitles: Vec<Subtitle> = Vec::new();
+
+        if let Some(data) = response.get("data") {
+            if let Some(item) = data.get("item") {
+                if let Some(episode_list) = item.get("episodes").and_then(|e| e.as_array()) {
+                    let mut sorted_servers = episode_list.clone();
+                    sorted_servers.sort_by(|a, b| {
+                        let a_name = a["server_name"].as_str().unwrap_or("").to_lowercase();
+                        let b_name = b["server_name"].as_str().unwrap_or("").to_lowercase();
+                        let a_priority = if a_name.contains("hà nội") || a_name.contains("vietsub") { 0 } else { 1 };
+                        let b_priority = if b_name.contains("hà nội") || b_name.contains("vietsub") { 0 } else { 1 };
+                        a_priority.cmp(&b_priority)
+                    });
+
+                    'outer: for server in sorted_servers {
+                        if let Some(server_data) = server.get("server_data").and_then(|s| s.as_array()) {
+                            for ep in server_data {
+                                let name = ep["name"].as_str().unwrap_or("");
+                                let ep_num = super::parse_episode_number(name);
+                                let search_num = episode_number.parse::<u32>().unwrap_or(0);
+
+                                if ep_num == search_num {
+                                    if let Some(link) = ep["link_m3u8"].as_str() {
+                                        if !link.is_empty() {
+                                            stream_url = link.to_string();
+                                        }
+                                    }
+
+                                    if stream_url.is_empty() {
+                                        if let Some(link) = ep["link_embed"].as_str() {
+                                            if link.contains("url=") {
+                                                if let Some(url_part) = link.split("url=").last() {
+                                                    stream_url = url_part.to_string();
+                                                }
+                                            } else {
+                                                stream_url = link.to_string();
+                                            }
+                                        }
+                                    }
+
+                                    subtitles.push(Subtitle {
+                                        language: "vi".to_string(),
+                                        url: String::new(),
+                                    });
+
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+
+        if stream_url.is_empty() {
+            anyhow::bail!("No working stream URL found for this episode.");
+        }
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("User-Agent".to_string(), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string());
+        headers.insert("Referer".to_string(), "https://ophim17.cc/".to_string());
+        headers.insert("Origin".to_string(), "https://ophim17.cc".to_string());
+
         Ok(StreamInfo {
-            video_url,
-            subtitles: Vec::new(),
-            qualities: vec!["auto".into()],
+            video_url: stream_url,
+            subtitles,
+            qualities: vec!["auto".to_string()],
             headers,
         })
-    }
-
-    async fn health_check(&self) -> Result<()> {
-        let episodes = self.get_episodes("21").await?;
-        let episode = episodes
-            .last()
-            .with_context(|| format!("{} health check found no One Piece episodes", self.name))?;
-        self.get_stream_url(&episode.id).await?;
-        Ok(())
-    }
-}
-
-fn normalized(value: &str) -> String {
-    value
-        .chars()
-        .filter_map(|character| {
-            if character.is_ascii_alphanumeric() {
-                Some(character.to_ascii_lowercase())
-            } else if character.is_whitespace() {
-                Some(' ')
-            } else {
-                None
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn title_values(item: &Value) -> Vec<String> {
-    item["titles"]
-        .as_object()
-        .map(|titles| {
-            titles
-                .values()
-                .filter_map(|value| value.as_str())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn search_score(query: &str, item: &Value) -> i32 {
-    let query = normalized(query);
-    let titles = title_values(item);
-    let mut score = titles
-        .iter()
-        .map(|title| {
-            let title = normalized(title);
-            if title == query {
-                1000
-            } else if title.starts_with(&query) {
-                650
-            } else if title.contains(&query) {
-                350
-            } else {
-                0
-            }
-        })
-        .max()
-        .unwrap_or_default();
-
-    match item["format"].as_str().unwrap_or_default() {
-        "TV" => score += 300,
-        "MOVIE" if query.contains("movie") || query.contains("film") => score += 250,
-        "MOVIE" => score -= 40,
-        "SPECIAL" | "OVA" | "ONA" => score -= 120,
-        _ => {}
-    }
-
-    if item["status"].as_str() == Some("RELEASING") {
-        score += 80;
-    }
-
-    score
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_identity_is_stable() {
-        let provider = AnimeVietSubProvider::new();
-        assert_eq!(provider.name(), "AnimeVietSub");
-        assert_eq!(provider.language(), Language::Vietnamese);
-    }
-
-    #[test]
-    fn ranks_exact_tv_result_above_specials() {
-        let special = serde_json::json!({
-            "format": "SPECIAL",
-            "status": "FINISHED",
-            "titles": {"en": "One Piece: Episode of Skypiea"}
-        });
-        let series = serde_json::json!({
-            "format": "TV",
-            "status": "RELEASING",
-            "titles": {"main": "One Piece", "vi": "Đảo hải tặc"}
-        });
-        assert!(search_score("One Piece", &series) > search_score("One Piece", &special));
     }
 }

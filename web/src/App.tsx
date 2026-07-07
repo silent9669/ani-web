@@ -72,7 +72,6 @@ function App() {
   const [catalogSearchError, setCatalogSearchError] = useState<AppError | null>(null);
   const [languageGroup, setLanguageGroup] = useState<"english" | "vietnamese">("english");
   const [discovery, setDiscovery] = useState<DiscoveryCatalog | null>(null);
-  const [myListCatalog, setMyListCatalog] = useState<CatalogAnime[]>([]);
   const [searchSelection, setSearchSelection] = useState<Anime | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<Anime | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -147,11 +146,10 @@ function App() {
 
   async function bootstrap() {
     try {
-      const [sourceList, history, favorites, favoriteCatalog] = await Promise.all([
+      const [sourceList, history, favorites] = await Promise.all([
         api.listSources(),
         api.getContinueWatching(200),
         api.getMyList(300),
-        api.getMyListCatalog(30).catch(() => []),
       ]);
       const savedSourceName = loadSavedSourceName();
       const nextSource = sourceList.find((source) => source.name === savedSourceName) ?? sourceList[0] ?? null;
@@ -161,7 +159,6 @@ function App() {
       if (nextSource) saveSourceName(nextSource.name);
       setContinueWatching(history);
       setMyList(favorites);
-      setMyListCatalog(favoriteCatalog);
       void api.listProviderHealth().then((health) => {
         setSources(health);
         setSelectedSource((current) => health.find((source) => source.name === current?.name) ?? health[0] ?? null);
@@ -177,14 +174,12 @@ function App() {
   }
 
   async function refreshShelfData() {
-    const [history, favorites, favoriteCatalog] = await Promise.all([
+    const [history, favorites] = await Promise.all([
       api.getContinueWatching(200),
       api.getMyList(300),
-      api.getMyListCatalog(30).catch(() => []),
     ]);
     setContinueWatching(history);
     setMyList(favorites);
-    setMyListCatalog(favoriteCatalog);
   }
 
   async function checkAppUpdates() {
@@ -520,23 +515,6 @@ function App() {
     await openAnime(historyToAnime(item, myList));
   }
 
-  async function openSavedAnime(anime: Anime) {
-    if (!anime.catalogId) {
-      setQuery(anime.title);
-      openSearch();
-      return;
-    }
-    openCatalogSearch({
-      catalogId: anime.catalogId,
-      title: anime.title,
-      coverUrl: anime.coverUrl,
-      bannerUrl: anime.bannerUrl,
-      description: anime.synopsis,
-      genres: [],
-      totalEpisodes: anime.totalEpisodes,
-    });
-  }
-
   async function toggleMyList(anime: Anime) {
     const key = animeKey(anime.provider, anime.id);
     try {
@@ -576,6 +554,11 @@ function App() {
 
   function markFavorite(key: string, isFavorite: boolean) {
     setResults((items) =>
+      items.map((item) =>
+        animeKey(item.provider, item.id) === key ? { ...item, isFavorite } : item,
+      ),
+    );
+    setProviderResults((items) =>
       items.map((item) =>
         animeKey(item.provider, item.id) === key ? { ...item, isFavorite } : item,
       ),
@@ -643,8 +626,9 @@ function App() {
                 continueItems={continueWatching.slice(0, 8)}
                 continueTotal={continueWatching.length}
                 discovery={discovery}
-                myListCatalog={myListCatalog}
+                savedAnime={savedAnime.slice(0, 10)}
                 onOpenCatalog={openCatalogSearch}
+                onOpenAnime={(anime) => void openAnime(anime)}
                 onShowCatalog={() => navigate("catalog")}
                 onResumeHistory={(item) => void openHistoryItem(item)}
                 onShowHistory={continueWatching.length ? () => navigate("continue") : undefined}
@@ -672,7 +656,7 @@ function App() {
             <MyListPage
               key="my-list"
               items={savedAnime}
-              onOpen={(anime) => void openSavedAnime(anime)}
+              onOpen={(anime) => void openAnime(anime)}
               onRemove={(anime) => void removeFromMyList(anime)}
               onBack={goBack}
             />
@@ -711,6 +695,7 @@ function App() {
               onOpenAnime={(anime) => void openAnime(anime)}
               onToggleMyList={(anime) => void toggleMyList(anime)}
               onBack={goBack}
+              myList={myList}
             />
           )}
 
@@ -879,8 +864,9 @@ function HomeDashboard({
   continueItems,
   continueTotal,
   discovery,
-  myListCatalog,
+  savedAnime,
   onOpenCatalog,
+  onOpenAnime,
   onShowCatalog,
   onResumeHistory,
   onShowHistory,
@@ -895,8 +881,9 @@ function HomeDashboard({
   continueItems: WatchHistory[];
   continueTotal: number;
   discovery: DiscoveryCatalog | null;
-  myListCatalog: CatalogAnime[];
+  savedAnime: Anime[];
   onOpenCatalog: (anime: CatalogAnime) => void;
+  onOpenAnime: (anime: Anime) => void;
   onShowCatalog: () => void;
   onResumeHistory: (item: WatchHistory) => void;
   onShowHistory?: () => void;
@@ -954,11 +941,14 @@ function HomeDashboard({
           onOpen={onOpenCatalog}
           onShowMore={onShowCatalog}
         />
-        <CatalogRow
+        <AnimeRow
           title="My List"
-          items={myListCatalog}
-          onOpen={onOpenCatalog}
+          items={savedAnime}
+          onOpen={onOpenAnime}
           onShowMore={onShowMyList}
+          myList={myList}
+          onToggleFavorite={onToggleFavorite}
+          onRemove={onToggleFavorite}
           emptyTitle="Your list is empty"
           emptySubtitle="Search and add titles to keep them here."
         />
@@ -1264,6 +1254,7 @@ function SearchStage({
   onOpenAnime,
   onToggleMyList,
   onBack,
+  myList,
 }: {
   query: string;
   results: CatalogAnime[];
@@ -1286,6 +1277,7 @@ function SearchStage({
   onOpenAnime: (anime: Anime) => void;
   onToggleMyList: (anime: Anime) => void;
   onBack: () => void;
+  myList: Favorite[];
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const previewImage =
@@ -1439,13 +1431,20 @@ function SearchStage({
                         <Play size={18} />
                         {selectedAnime ? "Open" : "Unavailable"}
                       </button>
-                      <button onClick={() => onToggleMyList(selectedAnime ?? catalogOnlyAnime(selectedCatalog!))}>
-                        {(selectedAnime?.isFavorite ?? false) ? (
-                          <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
-                        ) : (
-                          <Star size={18} style={{ color: "var(--red)" }} />
-                        )}
-                        {(selectedAnime?.isFavorite ?? false) ? "In My List" : "My List"}
+                      <button onClick={() => {
+                        const current = selectedAnime ?? catalogOnlyAnime(selectedCatalog!);
+                        onToggleMyList(current);
+                      }}>
+                        {(() => {
+                          const current = selectedAnime ?? catalogOnlyAnime(selectedCatalog!);
+                          const isFavorite = current.isFavorite || myList.some((item) => item.animeId === animeKey(current.provider, current.id));
+                          return (
+                            <>
+                              <Star size={18} fill={isFavorite ? "var(--red)" : "none"} style={{ color: "var(--red)" }} />
+                              {isFavorite ? "In My List" : "My List"}
+                            </>
+                          );
+                        })()}
                       </button>
                     </div>
                   </div>

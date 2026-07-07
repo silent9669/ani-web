@@ -11,9 +11,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const API_BASE: &str = "https://api3.aoneroom.com";
+const API_BASE: &str = "https://api6.aoneroom.com";
 const SECRET: &str = "NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRSXNWNjRGWnIyTw==";
-const MOBILE_USER_AGENT: &str = "com.community.oneroom/50020088 (Linux; U; Android 13; en_US; Samsung; Build/TQ3A.230901.001; Cronet/145.0.7582.0)";
+const MOBILE_USER_AGENT: &str = "com.community.oneroom/50020052 (Linux; U; Android 16; en_IN; sdk_gphone64_x86_64; Build/BP22.250325.006; Cronet/133.0.6876.3)";
 const PLAYBACK_USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
 
@@ -29,6 +29,7 @@ struct MovieBoxEpisode {
 
 pub struct MovieBoxProvider {
     client: reqwest::Client,
+    token: tokio::sync::Mutex<Option<String>>,
 }
 
 impl Default for MovieBoxProvider {
@@ -44,7 +45,42 @@ impl MovieBoxProvider {
                 .timeout(Duration::from_secs(20))
                 .build()
                 .expect("failed to build MovieBox client"),
+            token: tokio::sync::Mutex::new(None),
         }
+    }
+
+    async fn get_token(&self) -> Result<String> {
+        let mut lock = self.token.lock().await;
+        if let Some(token) = lock.as_ref() {
+            return Ok(token.clone());
+        }
+        
+        let url = Url::parse(API_BASE)?.join("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=")?;
+        let headers = signed_headers(&Method::GET, &url, None, None, None)?;
+        let response = self.client.request(Method::GET, url).headers(headers).send().await.context("MovieBox auth request failed")?;
+        
+        let status = response.status();
+        if !status.is_success() {
+            anyhow::bail!("PROVIDER_UNAVAILABLE: MovieBox auth failed (HTTP {status})");
+        }
+        
+        let x_user = response
+            .headers()
+            .get("x-user")
+            .context("MovieBox auth response missing x-user header")?
+            .to_str()
+            .context("MovieBox auth x-user header is not valid UTF-8")?;
+            
+        let x_user_json: Value = serde_json::from_str(x_user)
+            .context("MovieBox auth x-user header is invalid JSON")?;
+            
+        let token = x_user_json["token"]
+            .as_str()
+            .context("MovieBox auth x-user header missing token")?
+            .to_string();
+            
+        *lock = Some(token.clone());
+        Ok(token)
     }
 
     async fn request_json(
@@ -60,7 +96,8 @@ impl MovieBoxProvider {
             .map(serde_json::to_string)
             .transpose()
             .context("failed to encode MovieBox request")?;
-        let headers = signed_headers(&method, &url, body_text.as_deref(), play_mode)?;
+        let token = self.get_token().await?;
+        let headers = signed_headers(&method, &url, body_text.as_deref(), play_mode, Some(&token))?;
         let mut request = self.client.request(method, url).headers(headers);
         if let Some(body_text) = body_text {
             request = request.body(body_text);
@@ -395,6 +432,7 @@ fn signed_headers(
     url: &Url,
     body: Option<&str>,
     play_mode: Option<&str>,
+    auth_token: Option<&str>,
 ) -> Result<reqwest::header::HeaderMap> {
     use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
 
@@ -449,6 +487,12 @@ fn signed_headers(
             HeaderValue::from_str(play_mode)?,
         );
     }
+    if let Some(token) = auth_token {
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", token))?,
+        );
+    }
     Ok(headers)
 }
 
@@ -488,24 +532,20 @@ fn canonical_string(
 fn client_info() -> String {
     serde_json::json!({
         "package_name": "com.community.oneroom",
-        "version_name": "3.0.13.0325.03",
-        "version_code": 50020088,
+        "version_name": "3.0.05.0711.03",
+        "version_code": 50020052,
         "os": "android",
-        "os_version": "13",
-        "device_id": "bcaaef1d710d49d6b9d3ef430e8dd55a",
+        "os_version": "16",
+        "device_id": "da2b99c821e6ea023e4be55b54d5f7d8",
         "install_store": "ps",
-        "gaid": "1b2212c1-dadf-43c3-a0c8-bd6ce48ae22d",
-        "brand": "Samsung",
-        "model": "SM-S918B",
+        "gaid": "d7578036d13336cc",
+        "brand": "google",
+        "model": "sdk_gphone64_x86_64",
         "system_language": "en",
         "net": "NETWORK_WIFI",
-        "region": "US",
+        "region": "IN",
         "timezone": "Asia/Calcutta",
-        "sp_code": "",
-        "X-Play-Mode": "1",
-        "X-Idle-Data": "1",
-        "X-Family-Mode": "0",
-        "X-Content-Mode": "0"
+        "sp_code": ""
     })
     .to_string()
 }

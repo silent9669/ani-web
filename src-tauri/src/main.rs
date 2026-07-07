@@ -441,54 +441,7 @@ async fn get_my_list(
         .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))
 }
 
-#[tauri::command]
-async fn get_my_list_catalog(
-    state: State<'_, AppState>,
-    limit: Option<usize>,
-) -> Result<Vec<CatalogAnime>, AppErrorDto> {
-    let mut favorites = state
-        .db
-        .get_favorites(limit.unwrap_or(30))
-        .await
-        .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))?;
-    for favorite in favorites
-        .iter_mut()
-        .filter(|(_, catalog_id, _, _, _)| catalog_id.is_none())
-        .take(10)
-    {
-        let anime_id = favorite.0.clone();
-        let title = favorite.3.clone();
-        if let Ok(matches) = state.catalog.search(&title, 3).await {
-            if let Some(item) = matches
-                .into_iter()
-                .find(|item| normalize_title(&item.title) == normalize_title(&title))
-            {
-                let _ = state
-                    .db
-                    .update_favorite_catalog_id(&anime_id, item.catalog_id)
-                    .await;
-                favorite.1 = Some(item.catalog_id);
-            }
-        }
-    }
-    let ids = favorites
-        .iter()
-        .filter_map(|(_, catalog_id, _, _, _)| *catalog_id)
-        .collect::<Vec<_>>();
-    let mut items = state
-        .catalog
-        .by_ids(&ids)
-        .await
-        .map_err(|error| app_error("CATALOG_UNAVAILABLE", "favorites", None, error, true))?;
-    items.sort_by_key(|item| {
-        favorites
-            .iter()
-            .position(|(_, catalog_id, _, _, _)| *catalog_id == Some(item.catalog_id))
-            .unwrap_or(usize::MAX)
-    });
-    personalize_items(&state, &mut items).await;
-    Ok(items)
-}
+
 
 #[tauri::command]
 async fn search_source(
@@ -1209,7 +1162,6 @@ fn main() {
             resolve_availability,
             get_continue_watching,
             get_my_list,
-            get_my_list_catalog,
             search_source,
             get_anime_details,
             get_episodes,

@@ -35,8 +35,6 @@ export const api = {
   getContinueWatching: (limit = 20) =>
     invoke<WatchHistory[]>("get_continue_watching", { limit }),
   getMyList: (limit = 100) => invoke<Favorite[]>("get_my_list", { limit }),
-  getMyListCatalog: (limit = 30) =>
-    invoke<CatalogAnime[]>("get_my_list_catalog", { limit }),
   searchSource: (source: string, query: string) =>
     invoke<Anime[]>("search_source", { source, query }),
   getAnimeDetails: (provider: string, animeId: string, title: string) =>
