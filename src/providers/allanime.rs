@@ -173,7 +173,11 @@ impl AllAnimeProvider {
                 }
             }
         }
-        if decoded_xor.starts_with("/api") || decoded_xor.starts_with("http") || decoded_xor.starts_with("clock") || decoded_xor.starts_with("/clock") {
+        if decoded_xor.starts_with("/api")
+            || decoded_xor.starts_with("http")
+            || decoded_xor.starts_with("clock")
+            || decoded_xor.starts_with("/clock")
+        {
             return decoded_xor;
         }
 
@@ -1084,7 +1088,11 @@ impl AnimeProvider for AllAnimeProvider {
                 if let Some(source_url) = source["sourceUrl"].as_str() {
                     match self.resolve_source_url(source_url, priority_name).await {
                         Ok((mut resolved, mut resolved_subtitles)) => {
-                            eprintln!("Source {} resolved to {} candidates", priority_name, resolved.len());
+                            eprintln!(
+                                "Source {} resolved to {} candidates",
+                                priority_name,
+                                resolved.len()
+                            );
                             subtitles.append(&mut resolved_subtitles);
                             while let Some(candidate) = Self::best_candidate(resolved.clone()) {
                                 let playable = self.candidate_is_playable(&candidate).await;
@@ -1102,7 +1110,10 @@ impl AnimeProvider for AllAnimeProvider {
                             }
                         }
                         Err(err) => {
-                            eprintln!("AllAnime source {} failed for {}:{}: {}", priority_name, anime_id, episode_number, err);
+                            eprintln!(
+                                "AllAnime source {} failed for {}:{}: {}",
+                                priority_name, anime_id, episode_number, err
+                            );
                             tracing::warn!(
                                 "AllAnime source {} failed for {}:{}: {}",
                                 priority_name,
@@ -1274,7 +1285,10 @@ https://cdn.example/720/index.m3u8
     fn test_source_priority_matches_latest_ani_cli_active_sources() {
         let priority = AllAnimeProvider::source_priority();
 
-        assert_eq!(&priority[..5], ["Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4"]);
+        assert_eq!(
+            &priority[..5],
+            ["Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4"]
+        );
         assert!(priority.contains(&"Fm-Hls"));
         assert!(priority.contains(&"Fm-mp4"));
         assert!(priority.contains(&"Luf-Mp4"));
