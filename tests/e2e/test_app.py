@@ -37,7 +37,7 @@ def test_t1_dashboard_continue_watching_shelf(mocked_page):
 def test_t1_dashboard_my_list_shelf(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('My List')")
     expect(shelf).to_be_visible()
-    card = shelf.locator(".catalog-card")
+    card = shelf.locator(".poster-card")
     expect(card.first).to_be_visible()
     expect(card.locator("span").first).to_have_text("Naruto")
 

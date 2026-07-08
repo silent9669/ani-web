@@ -4,7 +4,7 @@ use reqwest::Client;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
-async fn test_auth() {
+async fn test_auth_headers() {
     let client = Client::new();
     let url = "https://api6.aoneroom.com/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=";
 
@@ -14,7 +14,6 @@ async fn test_auth() {
         .as_millis() as u64;
 
     let content_type = "application/json";
-    let _body: Option<&str> = None;
 
     let method = reqwest::Method::GET;
     let url_parsed = reqwest::Url::parse(url).unwrap();
@@ -71,14 +70,13 @@ async fn test_auth() {
         .header("x-tr-signature", format!("{}|2|{}", timestamp, signature))
         .header("X-Client-Info", client_info)
         .header("X-Client-Status", "0")
+        .header("x-play-mode", "2")
         .send()
         .await
         .unwrap();
 
     println!("Status: {}", res.status());
-    if let Some(x_user) = res.headers().get("x-user") {
-        println!("x-user: {:?}", x_user);
+    for (k, v) in res.headers().iter() {
+        println!("{}: {:?}", k, v);
     }
-    let text = res.text().await.unwrap();
-    println!("Response: {}", text.chars().take(200).collect::<String>());
 }

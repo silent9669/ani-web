@@ -265,13 +265,25 @@ impl AnimeProvider for AnimeVietSubProvider {
                     sorted_servers.sort_by(|a, b| {
                         let a_name = a["server_name"].as_str().unwrap_or("").to_lowercase();
                         let b_name = b["server_name"].as_str().unwrap_or("").to_lowercase();
-                        let a_priority = if a_name.contains("hà nội") || a_name.contains("vietsub") { 0 } else { 1 };
-                        let b_priority = if b_name.contains("hà nội") || b_name.contains("vietsub") { 0 } else { 1 };
+                        let a_priority = if a_name.contains("hà nội") || a_name.contains("vietsub")
+                        {
+                            0
+                        } else {
+                            1
+                        };
+                        let b_priority = if b_name.contains("hà nội") || b_name.contains("vietsub")
+                        {
+                            0
+                        } else {
+                            1
+                        };
                         a_priority.cmp(&b_priority)
                     });
 
                     'outer: for server in sorted_servers {
-                        if let Some(server_data) = server.get("server_data").and_then(|s| s.as_array()) {
+                        if let Some(server_data) =
+                            server.get("server_data").and_then(|s| s.as_array())
+                        {
                             for ep in server_data {
                                 let name = ep["name"].as_str().unwrap_or("");
                                 let ep_num = super::parse_episode_number(name);

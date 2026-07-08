@@ -4,28 +4,42 @@ use reqwest::Client;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
-async fn test_auth() {
+async fn test_auth_post() {
     let client = Client::new();
-    let url = "https://api6.aoneroom.com/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=";
+    let url = "https://api6.aoneroom.com/wefeed-mobile-bff/subject-api/search/v2";
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
 
-    let content_type = "application/json";
-    let _body: Option<&str> = None;
+    let content_type = "application/json; charset=utf-8";
 
-    let method = reqwest::Method::GET;
+    let method = reqwest::Method::POST;
     let url_parsed = reqwest::Url::parse(url).unwrap();
 
     let query = url_parsed.query().unwrap_or("");
+
+    let body_str = serde_json::json!({
+        "keyword": "naruto",
+        "page": 1,
+        "pageSize": 20
+    })
+    .to_string();
+
+    let body_hash = Md5::digest(body_str.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+
     let canonical = format!(
-        "{}\napplication/json\n{content_type}\n\n{timestamp}\n\n{}?{}",
+        "{}\napplication/json\n{content_type}\n{}\n{timestamp}\n{body_hash}\n{}?{}",
         method.as_str().to_uppercase(),
+        body_str.len(),
         url_parsed.path(),
         query
     );
+    let canonical = canonical.trim_end_matches('?').to_string();
 
     let secret = "NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRSXNWNjRGWnIyTw==";
     let first = STANDARD.decode(secret).unwrap();
@@ -63,7 +77,7 @@ async fn test_auth() {
     })
     .to_string();
 
-    let res = client.get(url)
+    let res = client.post(url)
         .header("User-Agent", "com.community.oneroom/50020052 (Linux; U; Android 16; en_IN; sdk_gphone64_x86_64; Build/BP22.250325.006; Cronet/133.0.6876.3)")
         .header("Accept", "application/json")
         .header("Content-Type", content_type)
@@ -71,14 +85,13 @@ async fn test_auth() {
         .header("x-tr-signature", format!("{}|2|{}", timestamp, signature))
         .header("X-Client-Info", client_info)
         .header("X-Client-Status", "0")
+        .header("x-play-mode", "2")
+        .body(body_str)
         .send()
         .await
         .unwrap();
 
     println!("Status: {}", res.status());
-    if let Some(x_user) = res.headers().get("x-user") {
-        println!("x-user: {:?}", x_user);
-    }
     let text = res.text().await.unwrap();
-    println!("Response: {}", text.chars().take(200).collect::<String>());
+    println!("Response: {}", text);
 }

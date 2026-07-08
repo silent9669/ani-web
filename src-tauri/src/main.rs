@@ -441,8 +441,6 @@ async fn get_my_list(
         .map_err(|error| app_error("DATABASE_ERROR", "favorites", None, error, true))
 }
 
-
-
 #[tauri::command]
 async fn search_source(
     state: State<'_, AppState>,

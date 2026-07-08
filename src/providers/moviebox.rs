@@ -54,31 +54,38 @@ impl MovieBoxProvider {
         if let Some(token) = lock.as_ref() {
             return Ok(token.clone());
         }
-        
-        let url = Url::parse(API_BASE)?.join("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=")?;
+
+        let url = Url::parse(API_BASE)?
+            .join("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=")?;
         let headers = signed_headers(&Method::GET, &url, None, None, None)?;
-        let response = self.client.request(Method::GET, url).headers(headers).send().await.context("MovieBox auth request failed")?;
-        
+        let response = self
+            .client
+            .request(Method::GET, url)
+            .headers(headers)
+            .send()
+            .await
+            .context("MovieBox auth request failed")?;
+
         let status = response.status();
         if !status.is_success() {
             anyhow::bail!("PROVIDER_UNAVAILABLE: MovieBox auth failed (HTTP {status})");
         }
-        
+
         let x_user = response
             .headers()
             .get("x-user")
             .context("MovieBox auth response missing x-user header")?
             .to_str()
             .context("MovieBox auth x-user header is not valid UTF-8")?;
-            
-        let x_user_json: Value = serde_json::from_str(x_user)
-            .context("MovieBox auth x-user header is invalid JSON")?;
-            
+
+        let x_user_json: Value =
+            serde_json::from_str(x_user).context("MovieBox auth x-user header is invalid JSON")?;
+
         let token = x_user_json["token"]
             .as_str()
             .context("MovieBox auth x-user header missing token")?
             .to_string();
-            
+
         *lock = Some(token.clone());
         Ok(token)
     }
