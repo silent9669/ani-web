@@ -8,11 +8,13 @@ use reqwest::header::{self, HeaderMap};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 const ALLANIME_API: &str = "https://api.allanime.day/api";
 const ALLANIME_BASE: &str = "https://allanime.day";
 const ALLANIME_REFERRER: &str = "https://youtu-chan.com";
 const MP4UPLOAD_REFERRER: &str = "https://www.mp4upload.com";
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +29,7 @@ impl StreamCandidate {
     fn new(url: String, label: impl Into<String>) -> Self {
         let mut headers = HashMap::new();
         headers.insert("Referer".to_string(), ALLANIME_REFERRER.to_string());
+        headers.insert("User-Agent".to_string(), USER_AGENT.to_string());
 
         Self {
             url,
@@ -50,6 +53,7 @@ impl StreamCandidate {
 pub struct AllAnimeProvider {
     client: reqwest::Client,
     insecure_client: reqwest::Client,
+    verification_cookie: RwLock<Option<String>>,
 }
 
 impl Default for AllAnimeProvider {
@@ -63,9 +67,7 @@ impl AllAnimeProvider {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::USER_AGENT,
-            header::HeaderValue::from_static(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            ),
+            header::HeaderValue::from_static(USER_AGENT),
         );
         headers.insert(
             header::REFERER,
@@ -88,6 +90,17 @@ impl AllAnimeProvider {
         Self {
             client,
             insecure_client,
+            verification_cookie: RwLock::new(None),
+        }
+    }
+
+    async fn with_verification_cookie(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        match self.verification_cookie.read().await.clone() {
+            Some(cookie) if !cookie.is_empty() => request.header(header::COOKIE, cookie),
+            _ => request,
         }
     }
 
@@ -132,9 +145,10 @@ impl AllAnimeProvider {
         query: &str,
         variables: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let response: serde_json::Value = self
-            .client
-            .post(ALLANIME_API)
+        let request = self
+            .with_verification_cookie(self.client.post(ALLANIME_API))
+            .await;
+        let response: serde_json::Value = request
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
                 "variables": variables,
@@ -376,6 +390,35 @@ impl AllAnimeProvider {
                 .and_then(|captures| captures.get(1))
                 .map(|matched| matched.as_str().replace("\\u0026", "&").replace("\\/", "/"))
         })
+    }
+
+    fn extract_okru_stream_url(html: &str) -> Option<String> {
+        let encoded_options = Regex::new(r#"data-options=\"([^\"]+)\""#)
+            .ok()?
+            .captures(html)?
+            .get(1)?
+            .as_str();
+        let decoded_options = encoded_options
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .replace("&#39;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
+        let options: serde_json::Value = serde_json::from_str(&decoded_options).ok()?;
+        let metadata = options.pointer("/flashvars/metadata")?.as_str()?;
+        let metadata: serde_json::Value = serde_json::from_str(metadata).ok()?;
+
+        metadata["ondemandHls"]
+            .as_str()
+            .filter(|url| !url.is_empty())
+            .or_else(|| {
+                metadata["videos"]
+                    .as_array()?
+                    .iter()
+                    .rev()
+                    .find_map(|video| video["url"].as_str().filter(|url| !url.is_empty()))
+            })
+            .map(str::to_string)
     }
 
     fn parse_hls_master_playlist(
@@ -632,7 +675,32 @@ impl AllAnimeProvider {
                     Vec::new(),
                 ));
             }
-            // If extraction fails, fallback to returning the original embed url below
+
+            tracing::warn!("AllAnime mp4upload embed did not contain a media URL");
+            return Ok((Vec::new(), Vec::new()));
+        }
+
+        if url.contains("ok.ru/videoembed") {
+            let html = self
+                .client
+                .get(url)
+                .header(header::REFERER, ALLANIME_REFERRER)
+                .send()
+                .await
+                .context("Failed to fetch OK.ru embed page")?
+                .text()
+                .await
+                .context("Failed to read OK.ru embed page")?;
+
+            if let Some(stream_url) = Self::extract_okru_stream_url(&html) {
+                return Ok((
+                    vec![StreamCandidate::new(stream_url, "ok.ru").with_referrer(url)],
+                    Vec::new(),
+                ));
+            }
+
+            tracing::warn!("AllAnime OK.ru embed did not contain a media URL");
+            return Ok((Vec::new(), Vec::new()));
         }
 
         if url.contains(".m3u8") {
@@ -700,8 +768,6 @@ impl AllAnimeProvider {
             .text()
             .await
             .context("Failed to read AllAnime provider endpoint")?;
-
-        println!("Endpoint response for {}: {}", source_name, response);
 
         if source_name.starts_with("Fm") {
             if let Ok(candidates) = Self::decrypt_filemoon_payload(&response) {
@@ -800,9 +866,6 @@ impl AllAnimeProvider {
                     .to_ascii_lowercase();
 
                 if content_type.contains("text/html") {
-                    if candidate.url.contains("ok.ru") || candidate.url.contains("mp4upload.com") {
-                        return true;
-                    }
                     tracing::warn!(
                         "AllAnime candidate probe resolved to HTML instead of media: {}",
                         candidate.url
@@ -844,6 +907,16 @@ impl AnimeProvider for AllAnimeProvider {
 
     fn supported_languages(&self) -> Vec<String> {
         vec!["🇺🇸".to_string()]
+    }
+
+    fn verification_url(&self) -> Option<&'static str> {
+        Some(ALLANIME_API)
+    }
+
+    async fn apply_verification_cookies(&self, cookie_header: String) -> Result<()> {
+        let mut cookie = self.verification_cookie.write().await;
+        *cookie = (!cookie_header.trim().is_empty()).then_some(cookie_header);
+        Ok(())
     }
 
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
@@ -1008,9 +1081,10 @@ impl AnimeProvider for AllAnimeProvider {
             ALLANIME_API, encoded_vars, encoded_ext
         );
 
-        let response_text = self
-            .client
-            .get(&api_url)
+        let request = self
+            .with_verification_cookie(self.client.get(&api_url))
+            .await;
+        let response_text = request
             .header("Origin", ALLANIME_REFERRER)
             .send()
             .await
@@ -1030,9 +1104,10 @@ impl AnimeProvider for AllAnimeProvider {
         if response.get("errors").is_some() || !has_data {
             let embed_gql = r#"query($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls }}"#;
 
-            response = self
-                .client
-                .post(ALLANIME_API)
+            let request = self
+                .with_verification_cookie(self.client.post(ALLANIME_API))
+                .await;
+            response = request
                 .header("Content-Type", "application/json")
                 .json(&serde_json::json!({
                     "variables": variables,
@@ -1241,6 +1316,15 @@ mod tests {
         assert_eq!(
             AllAnimeProvider::extract_mp4upload_url(html).as_deref(),
             Some("https://s1.mp4upload.com:282/d/example/video.mp4?token=a&b=c")
+        );
+    }
+
+    #[test]
+    fn test_extract_okru_hls_url() {
+        let html = r#"<div data-options="{&quot;flashvars&quot;:{&quot;metadata&quot;:&quot;{\&quot;videos\&quot;:[{\&quot;url\&quot;:\&quot;https://cdn.example/video.mp4\&quot;}],\&quot;ondemandHls\&quot;:\&quot;https://cdn.example/master.m3u8\&quot;}&quot;}}"></div>"#;
+        assert_eq!(
+            AllAnimeProvider::extract_okru_stream_url(html).as_deref(),
+            Some("https://cdn.example/master.m3u8")
         );
     }
 

@@ -66,6 +66,10 @@ impl AnimeProvider for OphimProvider {
         vec!["🇻🇳".to_string()]
     }
 
+    fn website_url(&self) -> Option<&'static str> {
+        Some("https://ophim19.cc")
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
         let search_url = format!("{}/tim-kiem", OPHIM_API);
 

@@ -37,7 +37,7 @@ def test_t1_dashboard_continue_watching_shelf(mocked_page):
 def test_t1_dashboard_my_list_shelf(mocked_page):
     shelf = mocked_page.locator(".content-row:has-text('My List')")
     expect(shelf).to_be_visible()
-    card = shelf.locator(".catalog-card")
+    card = shelf.locator(".poster-card")
     expect(card.first).to_be_visible()
     expect(card.locator("span").first).to_have_text("Naruto")
 
@@ -93,7 +93,7 @@ def test_t1_search_provider_chips(mocked_page):
     expect(mocked_page.locator(".search-stage .search-command-panel")).to_be_visible()
     chips = mocked_page.locator(".search-stage .provider-chip")
     expect(chips.first).to_be_visible()
-    expect(chips).to_have_count(1)
+    expect(chips).to_have_count(2)
     spacing_ok = mocked_page.evaluate("""() => {
         const input = document.querySelector('.search-stage .search-input-shell');
         const source = document.querySelector('.search-stage .search-source-row');
@@ -283,7 +283,7 @@ def test_t1_platform_unsupported_browser(mocked_page):
 def test_t2_dashboard_no_providers(mocked_page):
     # Setup state to simulate empty sources
     mocked_page.evaluate("""() => {
-        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        const state = window.__TAURI_MOCK_STATE__;
         state.sources = [];
         localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
     }""")
@@ -382,6 +382,32 @@ def test_t2_search_provider_disconnect(mocked_page):
     mocked_page.locator(".search-input-shell input").fill("Naruto")
     expect(mocked_page.locator(".error-notice")).to_be_visible()
     expect(mocked_page.locator(".error-notice strong")).to_have_text("UNEXPECTED_ERROR")
+
+def test_t2_allanime_manual_verification_recovery(mocked_page):
+    mocked_page.evaluate("""() => {
+        const state = window.__TAURI_MOCK_STATE__;
+        state.sources = (state.sources || []).map((source) => source.name === 'AllAnime'
+            ? { ...source, status: 'unavailable', failureCode: 'PROVIDER_CAPTCHA' }
+            : source);
+        localStorage.setItem('__TAURI_MOCK_STATE__', JSON.stringify(state));
+    }""")
+    mocked_page.reload()
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".availability-strip .provider-chip:has-text('AllAnime')").click()
+
+    recovery = mocked_page.locator(".provider-recovery")
+    expect(recovery).to_be_visible()
+    expect(recovery).to_contain_text("Provider verification / Xác minh nguồn")
+    expect(recovery).to_contain_text("tự hoàn tất Cloudflare")
+
+    recovery.get_by_role("button", name="Open site / Mở trang").click()
+    opened = mocked_page.evaluate("""() => window.__TAURI_CALLS__.some(
+        (call) => call.cmd === 'open_provider_access' && call.args.provider === 'AllAnime'
+    )""")
+    assert opened is True
+
+    recovery.get_by_role("button", name="I finished — retry / Đã xong — thử lại").click()
+    expect(mocked_page.locator(".provider-recovery")).to_have_count(0)
 
 def test_t2_search_catalog_rate_limit_keeps_provider_results(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
@@ -675,7 +701,7 @@ def test_t3_search_provider_switch_reloads(mocked_page):
 
     mocked_page.locator(".language-switch button").nth(1).click()
     mocked_page.wait_for_timeout(500)
-    expect(mocked_page.locator(".availability-strip .provider-chip")).to_have_count(3)
+    expect(mocked_page.locator(".availability-strip .provider-chip")).to_have_count(2)
     expect(mocked_page.locator(".search-input-shell input")).to_have_value("Naruto")
     mocked_page.locator(".availability-strip .provider-chip:has-text('OPhim')").click()
     expect(mocked_page.locator(".search-results-pane")).to_contain_text("OPhim Results")

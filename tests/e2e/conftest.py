@@ -57,10 +57,10 @@ def mocked_page(page, vite_server):
         const getMockState = () => {
             const defaults = {
                 sources: [
-                    { name: "AllAnime", language: "English", languageGroup: "english", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
-                    { name: "KKPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
-                    { name: "OPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
-                    { name: "AnimeVietSub", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: false } }
+                    { name: "AllAnime", language: "English", languageGroup: "english", status: "healthy", failureCode: null, websiteUrl: null, verificationUrl: "https://api.allanime.day/api", capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
+                    { name: "AnimeGG", language: "English", languageGroup: "english", status: "healthy", failureCode: null, websiteUrl: "https://www.animegg.org", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: false } },
+                    { name: "KKPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, websiteUrl: "https://www.kkphim.com", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
+                    { name: "OPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, websiteUrl: "https://ophim19.cc", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } }
                 ],
                 my_list: [
                     {
@@ -118,6 +118,14 @@ def mocked_page(page, vite_server):
             if (cmd === "list_sources") {
                 return state.sources;
             } else if (cmd === "list_provider_health" || cmd === "retry_provider_health") {
+                return state.sources;
+            } else if (cmd === "open_provider_access") {
+                return null;
+            } else if (cmd === "complete_provider_verification") {
+                state.sources = state.sources.map((source) => source.name === args.provider
+                    ? { ...source, status: "healthy", failureCode: null }
+                    : source);
+                saveMockState(state);
                 return state.sources;
             } else if (cmd === "get_discovery") {
                 const makeCatalog = (index) => ({

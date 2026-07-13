@@ -38,21 +38,30 @@ impl AnimeGgProvider {
     }
 
     async fn html(&self, url: Url, operation: &str) -> Result<String> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .with_context(|| format!("{operation} request failed"))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .with_context(|| format!("{operation} returned an unreadable response"))?;
-        if !status.is_success() {
-            anyhow::bail!("PROVIDER_UNAVAILABLE: {operation} returned HTTP {status}");
+        let mut last_error = None;
+        for _ in 0..2 {
+            let response = match self.client.get(url.clone()).send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    last_error = Some(
+                        anyhow::Error::new(error).context(format!("{operation} request failed")),
+                    );
+                    continue;
+                }
+            };
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .with_context(|| format!("{operation} returned an unreadable response"))?;
+            if status.is_success() {
+                return Ok(body);
+            }
+            last_error = Some(anyhow::anyhow!(
+                "PROVIDER_UNAVAILABLE: {operation} returned HTTP {status}"
+            ));
         }
-        Ok(body)
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("{operation} request failed")))
     }
 
     fn absolute_url(value: &str) -> Result<String> {
@@ -169,6 +178,10 @@ impl AnimeProvider for AnimeGgProvider {
         vec!["en".into()]
     }
 
+    fn website_url(&self) -> Option<&'static str> {
+        Some(BASE_URL)
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
         let mut url = Url::parse(&format!("{BASE_URL}/search/"))?;
         url.query_pairs_mut().append_pair("q", query);
@@ -228,14 +241,15 @@ impl AnimeProvider for AnimeGgProvider {
             .into_iter()
             .find(|anime| clean_key(&anime.title) == "onepiece")
             .context("AnimeGG health check found no exact One Piece result")?;
-        let episode = self
-            .get_episodes(&anime.id)
-            .await?
-            .into_iter()
-            .next_back()
-            .context("AnimeGG health check found no episodes")?;
-        self.get_stream_url(&episode.id).await?;
-        Ok(())
+        let episodes = self.get_episodes(&anime.id).await?;
+        let mut last_error = None;
+        for episode in episodes.into_iter().rev().take(24) {
+            match self.get_stream_url(&episode.id).await {
+                Ok(_) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("AnimeGG health check found no episodes")))
     }
 }
 
