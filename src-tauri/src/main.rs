@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod download;
 mod proxy;
 
 use ani_desk_core::catalog::{
@@ -15,11 +16,13 @@ use ani_desk_core::providers::{
 };
 use anyhow::Context;
 use chrono::Utc;
+use download::{DownloadEvent, DownloadRequest, DownloadResult};
 use proxy::ProxyState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -767,6 +770,20 @@ async fn prepare_playback(
 }
 
 #[tauri::command]
+async fn download_episode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: DownloadRequest,
+    on_event: Channel<DownloadEvent>,
+) -> Result<DownloadResult, AppErrorDto> {
+    let provider = request.provider.clone();
+    let stream = resolve_stream(&state, &provider, &request.episode_id).await?;
+    download::download_episode(&app, &stream, &request, &on_event)
+        .await
+        .map_err(|error| app_error("DOWNLOAD_FAILED", "download", Some(&provider), error, true))
+}
+
+#[tauri::command]
 async fn open_in_mpv(
     state: State<'_, AppState>,
     provider: String,
@@ -1129,6 +1146,9 @@ fn user_error_message(code: &str) -> &'static str {
         "PROXY_FAILED" => "The local playback proxy could not start this stream.",
         "PLAYER_LAUNCH_FAILED" => "The external player could not be opened.",
         "DATABASE_ERROR" => "The local library could not be updated.",
+        "DOWNLOAD_FAILED" => {
+            "This episode could not be downloaded. Check the source and try again."
+        }
         _ => "ani-desk could not complete this request.",
     }
 }
@@ -1344,6 +1364,7 @@ fn main() {
             get_anime_details,
             get_episodes,
             prepare_playback,
+            download_episode,
             open_in_mpv,
             save_progress,
             add_to_my_list,

@@ -89,6 +89,7 @@ def mocked_page(page, vite_server):
                 catalog_search_error: null,
                 provider_search_error: null,
                 playback_error: null,
+                download_error: null,
                 update_available: false,
                 update_error: null,
                 update_install_error: null,
@@ -353,6 +354,24 @@ def mocked_page(page, vite_server):
                     subtitles: [],
                     qualities: ["360p", "720p", "1080p"],
                     canFallbackToMpv: true
+                };
+            } else if (cmd === "download_episode") {
+                if (state.download_error) {
+                    throw new Error(state.download_error);
+                }
+                const fileName = `Episode ${String(args.request.episodeNumber).padStart(2, "0")}.ts`;
+                if (args.onEvent && typeof args.onEvent.onmessage === "function") {
+                    args.onEvent.onmessage({ event: "started", progress: 0, downloadedBytes: 0, totalBytes: null, completedSegments: null, totalSegments: 2, fileName });
+                    args.onEvent.onmessage({ event: "progress", progress: 50, downloadedBytes: 1024, totalBytes: null, completedSegments: 1, totalSegments: 2, fileName: null });
+                    args.onEvent.onmessage({ event: "progress", progress: 100, downloadedBytes: 2048, totalBytes: null, completedSegments: 2, totalSegments: 2, fileName: null });
+                }
+                state.last_download = args.request;
+                saveMockState(state);
+                return {
+                    filePath: `/Users/test/Downloads/ani-desk/${args.request.animeTitle}/${fileName}`,
+                    fileName,
+                    bytesDownloaded: 2048,
+                    mediaKind: "hls-ts"
                 };
             } else if (cmd === "save_progress") {
                 if (args.progress) {

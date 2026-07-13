@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   Anime,
   AnimeDetails,
@@ -6,6 +6,8 @@ import type {
   CatalogFilters,
   CatalogPage,
   DiscoveryCatalog,
+  DownloadEvent,
+  DownloadResult,
   Episode,
   Favorite,
   Playback,
@@ -47,6 +49,20 @@ export const api = {
     invoke<Episode[]>("get_episodes", { provider, animeId }),
   preparePlayback: (provider: string, episodeId: string) =>
     invoke<Playback>("prepare_playback", { provider, episodeId }),
+  downloadEpisode: (
+    request: {
+      provider: string;
+      episodeId: string;
+      animeTitle: string;
+      episodeNumber: number;
+      episodeTitle?: string | null;
+    },
+    onProgress: (event: DownloadEvent) => void,
+  ) => {
+    const onEvent = new Channel<DownloadEvent>();
+    onEvent.onmessage = onProgress;
+    return invoke<DownloadResult>("download_episode", { request, onEvent });
+  },
   openInMpv: (provider: string, episodeId: string, startTime?: number) =>
     invoke<void>("open_in_mpv", {
       provider,

@@ -7,9 +7,12 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Download,
   Film,
   Loader2,
+  Maximize2,
   Pause,
+  PictureInPicture2,
   Play,
   Plus,
   Search,
@@ -22,7 +25,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
@@ -35,6 +38,7 @@ import type {
   CatalogFilters,
   DiscoveryCatalog,
   Episode,
+  EpisodeDownloadState,
   Favorite,
   PlayerContext,
   ProviderAvailability,
@@ -78,6 +82,7 @@ function App() {
   const [continueWatching, setContinueWatching] = useState<WatchHistory[]>([]);
   const [myList, setMyList] = useState<Favorite[]>([]);
   const [player, setPlayer] = useState<PlayerContext | null>(null);
+  const [episodeDownloads, setEpisodeDownloads] = useState<Record<string, EpisodeDownloadState>>({});
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
@@ -618,6 +623,62 @@ function App() {
     }
   }
 
+  async function downloadEpisode(anime: Anime, episode: Episode) {
+    const key = episodeDownloadKey(anime, episode);
+    const current = episodeDownloads[key];
+    if (current?.status === "preparing" || current?.status === "downloading") return;
+
+    setEpisodeDownloads((items) => ({
+      ...items,
+      [key]: { status: "preparing", progress: 0, message: "Preparing download..." },
+    }));
+
+    try {
+      const result = await api.downloadEpisode(
+        {
+          provider: anime.provider,
+          episodeId: episode.id,
+          animeTitle: anime.title,
+          episodeNumber: episode.number,
+          episodeTitle: episode.title,
+        },
+        (event) => {
+          const segmentProgress = event.completedSegments && event.totalSegments
+            ? `${event.completedSegments} / ${event.totalSegments} segments`
+            : event.totalBytes
+              ? `${formatBytes(event.downloadedBytes)} / ${formatBytes(event.totalBytes)}`
+              : `${formatBytes(event.downloadedBytes)} downloaded`;
+          setEpisodeDownloads((items) => ({
+            ...items,
+            [key]: {
+              status: event.event === "started" ? "preparing" : "downloading",
+              progress: Math.max(0, Math.min(100, event.progress || 0)),
+              message: event.event === "started" ? `Saving ${event.fileName || `Episode ${episode.number}`}...` : segmentProgress,
+              fileName: event.fileName ?? items[key]?.fileName,
+            },
+          }));
+        },
+      );
+      setEpisodeDownloads((items) => ({
+        ...items,
+        [key]: {
+          status: "complete",
+          progress: 100,
+          message: `Saved to ${result.filePath}`,
+          filePath: result.filePath,
+          fileName: result.fileName,
+        },
+      }));
+    } catch (err) {
+      const appError = toAppError(err, "download");
+      setEpisodeDownloads((items) => ({
+        ...items,
+        [key]: { status: "error", progress: 0, message: appError.message },
+      }));
+      setError(appError);
+    }
+  }
+
   const savedAnime = useMemo(() => myList.map(favoriteToAnime), [myList]);
   const latestHistory = continueWatching[0] ?? null;
   const featuredAnime = latestHistory ? historyToAnime(latestHistory, myList) : savedAnime[0] ?? null;
@@ -653,7 +714,8 @@ function App() {
           />
         )}
 
-        <AnimatePresence mode="wait">
+        <LayoutGroup id="ani-desk-navigation">
+        <AnimatePresence mode="wait" initial={false}>
           {route === "home" && (
             <motion.div key="home" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
               <HomeDashboard
@@ -733,6 +795,7 @@ function App() {
               onSelectProviderResult={selectProviderResult}
               onSelectCatalog={selectCatalogResult}
               onOpenAnime={(anime) => void openAnime(anime)}
+              onDownload={(anime) => void openAnime(anime)}
               onToggleMyList={(anime) => void toggleMyList(anime)}
               onBack={goBack}
               myList={myList}
@@ -750,9 +813,12 @@ function App() {
               onBack={goBack}
               onToggleMyList={() => void toggleMyList(selectedAnime)}
               onPlay={(episode, startTime) => void playEpisode(selectedAnime, episode, startTime)}
+              onDownload={(episode) => void downloadEpisode(selectedAnime, episode)}
+              downloadStates={episodeDownloads}
             />
           )}
         </AnimatePresence>
+        </LayoutGroup>
       </main>
 
       <AnimatePresence>
@@ -934,7 +1000,7 @@ function HomeDashboard({
 }) {
   return (
     <section className="home-dashboard">
-      <img className="search-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
+      <img className="home-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
       <motion.div
         className="home-command-center"
         initial="hidden"
@@ -956,7 +1022,13 @@ function HomeDashboard({
           </div>
         </motion.div>
         <motion.div className="home-command-actions" variants={fadeUpVariant}>
-          <motion.button layoutId="app-search-shell" className="hero-search-trigger home-command-search" onClick={onOpenSearch}>
+          <motion.button
+            layoutId="app-search-shell"
+            className="hero-search-trigger home-command-search"
+            transition={{ layout: { type: "spring", stiffness: 420, damping: 38, mass: 0.78 } }}
+            whileTap={{ scale: 0.992 }}
+            onClick={onOpenSearch}
+          >
             <Search size={20} />
             <span>{query.trim() || "Search anime, films, OVAs..."}</span>
             {loading ? <Loader2 className="spin" size={18} /> : <ChevronRight size={19} />}
@@ -1295,6 +1367,7 @@ function SearchStage({
   onSelectProviderResult,
   onSelectCatalog,
   onOpenAnime,
+  onDownload,
   onToggleMyList,
   onBack,
   myList,
@@ -1321,6 +1394,7 @@ function SearchStage({
   onSelectProviderResult: (anime: Anime) => void;
   onSelectCatalog: (anime: CatalogAnime) => void;
   onOpenAnime: (anime: Anime) => void;
+  onDownload: (anime: Anime) => void;
   onToggleMyList: (anime: Anime) => void;
   onBack: () => void;
   myList: Favorite[];
@@ -1355,10 +1429,10 @@ function SearchStage({
   return (
     <motion.section
       className="search-stage"
-      initial={{ opacity: 0, scale: 0.985, y: 16 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.99, y: -14 }}
-      transition={{ duration: 0.26, ease: "easeOut" }}
+      initial={{ opacity: 0, scale: 0.975, y: 22, filter: "blur(10px)" }}
+      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.982, y: 16, filter: "blur(8px)" }}
+      transition={{ type: "spring", stiffness: 340, damping: 34, mass: 0.82 }}
     >
       <img className="search-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
       <div className="search-command-panel">
@@ -1366,7 +1440,11 @@ function SearchStage({
           <IconButton label="Back" onClick={onBack}>
             <ArrowLeft size={21} />
           </IconButton>
-          <motion.div layoutId="app-search-shell" className="search-input-shell">
+          <motion.div
+            layoutId="app-search-shell"
+            className="search-input-shell"
+            transition={{ layout: { type: "spring", stiffness: 420, damping: 38, mass: 0.78 } }}
+          >
             <Search size={20} />
             <input
               ref={inputRef}
@@ -1528,6 +1606,15 @@ function SearchStage({
                             </>
                           );
                         })()}
+                      </button>
+                      <button
+                        disabled={!selectedAnime}
+                        aria-label="Choose an episode to download"
+                        title="Choose an episode to download"
+                        onClick={() => selectedAnime && onDownload(selectedAnime)}
+                      >
+                        <Download size={18} />
+                        Download
                       </button>
                     </div>
                   </div>
@@ -1832,6 +1919,8 @@ function DetailPage({
   onBack,
   onToggleMyList,
   onPlay,
+  onDownload,
+  downloadStates,
 }: {
   anime: Anime;
   episodes: Episode[];
@@ -1841,6 +1930,8 @@ function DetailPage({
   onBack: () => void;
   onToggleMyList: () => void;
   onPlay: (episode: Episode, startTime?: number) => void;
+  onDownload: (episode: Episode) => void;
+  downloadStates: Record<string, EpisodeDownloadState>;
 }) {
   const [episodeQuery, setEpisodeQuery] = useState("");
   const [latestFirst, setLatestFirst] = useState(false);
@@ -1907,6 +1998,10 @@ function DetailPage({
   const activeRangeLabel = activeRangeEpisodes.length
     ? `${activeRangeEpisodes[0].number}-${activeRangeEpisodes[activeRangeEpisodes.length - 1].number}`
     : "0";
+  const bannerDownloadEpisode = resumeEpisode ?? firstEpisode;
+  const bannerDownloadState = bannerDownloadEpisode
+    ? downloadStates[episodeDownloadKey(anime, bannerDownloadEpisode)]
+    : undefined;
 
   function focusEpisode(episode: Episode) {
     const nextRange = baseRanges.findIndex((range) =>
@@ -1927,10 +2022,10 @@ function DetailPage({
   return (
     <motion.section
       className="detail-page"
-      initial={{ opacity: 0, scale: 0.985, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.99, y: -14 }}
-      transition={{ duration: 0.26, ease: "easeOut" }}
+      initial={{ opacity: 0, scale: 0.975, y: 22, filter: "blur(10px)" }}
+      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.985, y: 14, filter: "blur(8px)" }}
+      transition={{ type: "spring", stiffness: 330, damping: 34, mass: 0.85 }}
     >
       <div className="detail-page-shell">
         <IconButton label="Back" className="detail-back-button" onClick={onBack}>
@@ -2025,12 +2120,24 @@ function DetailPage({
                   {visibleEpisodes.map((episode) => {
                     const isResume = resumeEpisode?.number === episode.number;
                     const highlighted = highlightEpisodeNumber === episode.number;
+                    const downloadState = downloadStates[episodeDownloadKey(anime, episode)];
+                    const downloadBusy = downloadState?.status === "preparing" || downloadState?.status === "downloading";
                     return (
-                      <button
+                      <motion.div
                         className={`episode-list-row${episode.thumbnail ? " has-thumbnail" : ""}${isResume ? " watched" : ""}${highlighted ? " highlighted" : ""}`}
                         key={episode.id}
                         data-episode-number={episode.number}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0);
+                          }
+                        }}
+                        whileHover={{ y: -2 }}
+                        whileTap={{ scale: 0.995 }}
                       >
                         <span className="episode-thumb">
                           {episode.thumbnail ? <img src={episode.thumbnail} alt="" loading="lazy" /> : <Play size={18} />}
@@ -2040,8 +2147,21 @@ function DetailPage({
                           <small>{episode.title || `Episode ${episode.number}`}</small>
                         </span>
                         {isResume && <span className="episode-resume-pill">Resume</span>}
+                        <button
+                          className={`episode-download-button ${downloadState?.status || "idle"}`}
+                          disabled={downloadBusy}
+                          aria-label={`Download Episode ${episode.number}`}
+                          title={downloadState?.message || `Download Episode ${episode.number}`}
+                          style={{ "--download-progress": `${downloadState?.progress ?? 0}%` } as React.CSSProperties}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDownload(episode);
+                          }}
+                        >
+                          {downloadBusy ? <Loader2 className="spin" size={17} /> : downloadState?.status === "complete" ? <Check size={17} /> : <Download size={17} />}
+                        </button>
                         <Play className="episode-play-icon" size={18} fill="currentColor" />
-                      </button>
+                      </motion.div>
                     );
                   })}
                 </motion.div>
@@ -2077,6 +2197,21 @@ function DetailPage({
                   <Clock size={18} />
                   Latest
                 </button>
+                <button
+                  className={bannerDownloadState?.status === "complete" ? "download-complete" : ""}
+                  disabled={!bannerDownloadEpisode || bannerDownloadState?.status === "preparing" || bannerDownloadState?.status === "downloading"}
+                  title={bannerDownloadState?.message || "Save this episode to Downloads/ani-desk"}
+                  onClick={() => bannerDownloadEpisode && onDownload(bannerDownloadEpisode)}
+                >
+                  {bannerDownloadState?.status === "preparing" || bannerDownloadState?.status === "downloading"
+                    ? <Loader2 className="spin" size={18} />
+                    : bannerDownloadState?.status === "complete"
+                      ? <Check size={18} />
+                      : <Download size={18} />}
+                  {bannerDownloadState?.status === "complete"
+                    ? "Downloaded"
+                    : `Download E${bannerDownloadEpisode?.number ?? ""}`}
+                </button>
                 <button onClick={onToggleMyList}>
                   {isFavorite ? (
                     <Star size={18} fill="var(--red)" style={{ color: "var(--red)" }} />
@@ -2086,6 +2221,13 @@ function DetailPage({
                   {isFavorite ? "In My List" : "My List"}
                 </button>
               </div>
+              {bannerDownloadState?.message && (
+                <p className={`download-status-line ${bannerDownloadState.status}`} title={bannerDownloadState.message}>
+                  {bannerDownloadState.status === "complete"
+                    ? bannerDownloadState.message
+                    : `${Math.round(bannerDownloadState.progress)}% · ${bannerDownloadState.message}`}
+                </p>
+              )}
             </div>
           </aside>
         </div>
@@ -2110,7 +2252,6 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [showVolume, setShowVolume] = useState(false);
   const streamIsHls = context.playback.streamKind === "hls" || context.playback.originalUrl.toLowerCase().includes(".m3u8");
   const streamIsDash = context.playback.streamKind === "dash" || context.playback.originalUrl.toLowerCase().includes(".mpd");
   const subtitleTracks = context.playback.subtitles.filter((item) => item.url);
@@ -2402,6 +2543,30 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     }
   }
 
+  async function togglePictureInPicture() {
+    const video = videoRef.current;
+    if (!video) return;
+    const pipDocument = document as Document & {
+      pictureInPictureElement?: Element | null;
+      exitPictureInPicture?: () => Promise<void>;
+    };
+    const pipVideo = video as HTMLVideoElement & {
+      requestPictureInPicture?: () => Promise<unknown>;
+      webkitSetPresentationMode?: (mode: "inline" | "picture-in-picture") => void;
+      webkitPresentationMode?: string;
+    };
+
+    if (pipDocument.pictureInPictureElement && pipDocument.exitPictureInPicture) {
+      await pipDocument.exitPictureInPicture().catch(() => undefined);
+    } else if (pipVideo.requestPictureInPicture) {
+      await pipVideo.requestPictureInPicture().catch(() => undefined);
+    } else if (pipVideo.webkitSetPresentationMode) {
+      pipVideo.webkitSetPresentationMode(
+        pipVideo.webkitPresentationMode === "picture-in-picture" ? "inline" : "picture-in-picture",
+      );
+    }
+  }
+
   async function closePlayer() {
     await saveProgress(true);
     onClose();
@@ -2412,9 +2577,10 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   return (
     <motion.div
       className={showControls ? "player-overlay controls-visible" : "player-overlay"}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      initial={{ opacity: 0, scale: 0.985, filter: "blur(12px)" }}
+      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.99, filter: "blur(10px)" }}
+      transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
       onMouseMove={revealControls}
       onClick={revealControls}
     >
@@ -2439,14 +2605,30 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
       </video>
 
       <div className="player-top">
-        <button onClick={() => void closePlayer()}>
-          <ArrowLeft size={20} />
-          Back
-        </button>
-        <div>
-          <strong>{context.anime.title}</strong>
-          <span>Episode {context.episode.number}</span>
+        <div className="player-leading-controls">
+          <button onClick={() => void closePlayer()} aria-label="Back to episodes" title="Back to episodes">
+            <ArrowLeft size={20} />
+          </button>
+          <button onClick={() => void togglePictureInPicture()} aria-label="Picture in Picture" title="Picture in Picture">
+            <PictureInPicture2 size={20} />
+          </button>
         </div>
+      </div>
+
+      <div className="player-volume-dock">
+        <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>
+          {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+        </button>
+        <input
+          className="volume-slider"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={muted ? 0 : volume}
+          onChange={(event) => setVideoVolume(Number(event.target.value))}
+          aria-label="Volume"
+        />
       </div>
 
       <div className="player-center">
@@ -2468,59 +2650,53 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
             {context.playback.canFallbackToMpv && <button onClick={() => void openMpv()}>Open fallback player</button>}
           </div>
         )}
-        <input
-          className="player-progress"
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={1}
-          value={Math.min(currentTime, duration || currentTime)}
-          style={{ "--progress": `${progress}%` } as React.CSSProperties}
-          onChange={(event) => {
-            const video = videoRef.current;
-            if (!video) return;
-            video.currentTime = Number(event.target.value);
-            setCurrentTime(video.currentTime);
-          }}
-          onMouseUp={() => void saveProgress(true)}
-        />
         <div className="player-control-row">
-          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
-          <div className="player-volume-control" onMouseLeave={() => setShowVolume(false)}>
-            <button onClick={toggleMute} onMouseEnter={() => setShowVolume(true)} aria-label={muted ? "Unmute" : "Volume"}>
-              {muted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}
-            </button>
-            {showVolume && (
-              <div className="player-volume-popover">
-                <input
-                  className="volume-slider"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={muted ? 0 : volume}
-                  onChange={(event) => setVideoVolume(Number(event.target.value))}
-                  aria-label="Volume"
-                />
-              </div>
-            )}
+          <div className="player-now-playing">
+            <span>{context.anime.provider}</span>
+            <strong>{context.anime.title}</strong>
+            <small>Episode {context.episode.number}{context.episode.title ? ` · ${context.episode.title}` : ""}</small>
           </div>
-          <label>
-            Quality
+          <div className="player-utility-pill">
+            <button onClick={() => void toggleFullscreen()} aria-label="Toggle fullscreen" title="Toggle fullscreen">
+              <Maximize2 size={18} />
+            </button>
+            <label title="Video quality">
+              <span>Quality</span>
             <select value={quality} onChange={(event) => changeQuality(event.target.value)} disabled={(!streamIsHls && !streamIsDash) || !levels.length}>
               <option value="auto">Auto</option>
               {levels.map((level) => <option value={String(level.index)} key={level.index}>{level.label}</option>)}
             </select>
-          </label>
-          {subtitleTracks.length > 0 && (
-            <label>
-              Subtitles
-              <select value={subtitle} onChange={(event) => changeSubtitle(event.target.value)}>
-                <option value="off">Off</option>
-                {subtitleTracks.map((track, index) => <option value={String(index)} key={track.url}>{track.language}</option>)}
-              </select>
             </label>
-          )}
+            {subtitleTracks.length > 0 && (
+              <label title="Subtitles">
+                <span>Subtitles</span>
+                <select value={subtitle} onChange={(event) => changeSubtitle(event.target.value)}>
+                  <option value="off">Off</option>
+                  {subtitleTracks.map((track, index) => <option value={String(index)} key={track.url}>{track.language}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+        </div>
+        <div className="player-timeline">
+          <span>{formatTime(currentTime)}</span>
+          <input
+            className="player-progress"
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={1}
+            value={Math.min(currentTime, duration || currentTime)}
+            style={{ "--progress": `${progress}%` } as React.CSSProperties}
+            onChange={(event) => {
+              const video = videoRef.current;
+              if (!video) return;
+              video.currentTime = Number(event.target.value);
+              setCurrentTime(video.currentTime);
+            }}
+            onMouseUp={() => void saveProgress(true)}
+          />
+          <span>-{formatTime(Math.max(0, duration - currentTime))}</span>
         </div>
       </div>
     </motion.div>
@@ -2601,6 +2777,10 @@ function firstSearchableSource(sources: Source[], group: "english" | "vietnamese
     sources.find((source) => source.languageGroup === group) ??
     null
   );
+}
+
+function episodeDownloadKey(anime: Anime, episode: Episode) {
+  return `${animeKey(anime.provider, anime.id)}:${episode.id}`;
 }
 
 function plainDescription(value?: string | null): string {
