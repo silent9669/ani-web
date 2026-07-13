@@ -118,6 +118,16 @@ def test_t1_search_preview_pane(mocked_page):
     expect(mocked_page.locator(".search-preview")).to_be_visible()
     expect(mocked_page.locator(".search-preview h1")).to_have_text("Naruto Shippuden")
 
+def test_t1_search_preview_exposes_download_entry(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    download = mocked_page.get_by_role("button", name="Choose an episode to download")
+    expect(download).to_be_visible()
+    download.click()
+    expect(mocked_page.locator(".detail-page")).to_be_visible()
+
 def test_t1_search_has_internal_results_scroll_only(mocked_page):
     mocked_page.set_viewport_size({"width": 1440, "height": 900})
     mocked_page.locator(".hero-search-trigger").click()
@@ -201,6 +211,25 @@ def test_t1_episode_detail_page_back(mocked_page):
     expect(mocked_page.locator(".detail-page")).to_be_visible()
     mocked_page.locator(".detail-back-button").click()
     expect(mocked_page.locator(".search-stage")).to_be_visible()
+
+def test_t1_episode_download_completes_without_opening_player(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    mocked_page.locator(".detail-actions button.primary").click()
+    mocked_page.wait_for_selector(".episode-download-button")
+
+    download = mocked_page.locator(".episode-download-button").first
+    download.click()
+    expect(download).to_have_class("episode-download-button complete")
+    expect(mocked_page.locator("video")).to_have_count(0)
+    stored = mocked_page.evaluate("""() => {
+        const state = JSON.parse(localStorage.getItem('__TAURI_MOCK_STATE__') || '{}');
+        return state.last_download;
+    }""")
+    assert stored["episodeNumber"] == 1
+    assert stored["animeTitle"] == "Naruto Shippuden"
 
 
 # Liquid Glass Features (5 tests)
@@ -678,6 +707,21 @@ def test_t3_history_update_on_playback(mocked_page):
     close_btn = mocked_page.locator(".player-top button").first
     if close_btn.is_visible():
         close_btn.click()
+
+def test_t3_player_matches_apple_style_control_composition(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    mocked_page.locator(".detail-actions button.primary").click()
+    mocked_page.wait_for_selector(".episode-list-row")
+    mocked_page.locator(".episode-list-row").first.click()
+
+    expect(mocked_page.locator(".player-leading-controls")).to_be_visible()
+    expect(mocked_page.locator(".player-volume-dock")).to_be_visible()
+    expect(mocked_page.locator(".player-now-playing")).to_contain_text("Naruto Shippuden")
+    expect(mocked_page.locator(".player-timeline")).to_be_visible()
+    expect(mocked_page.locator(".player-utility-pill")).to_be_visible()
 
 def test_t3_my_list_nav_and_remove(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()

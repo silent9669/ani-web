@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-07-13
+### Added
+- Added episode downloads from search previews and the episode chooser, with visible progress and completed-file feedback.
+- Added native direct-media downloads and HLS segment assembly into the user's `Downloads/ani-desk` folder.
+
+### Changed
+- Rebuilt the video player around an Apple-inspired full-window layout with floating glass controls, centered transport, persistent volume, picture-in-picture, and a bottom metadata timeline.
+- Refined search, detail, and player transitions with spring-based shared-layout motion and smoother open/close states.
+- Modernized search and episode surfaces with layered glass panels, softer depth, and responsive controls.
+
 ## [1.0.3] - Unreleased
 ### Changed
 - Search is provider-first again: choose language/provider first, keep the same query while switching providers, and show only the selected provider's results to reduce source confusion.

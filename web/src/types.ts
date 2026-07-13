@@ -132,6 +132,31 @@ export type Playback = {
   canFallbackToMpv: boolean;
 };
 
+export type DownloadEvent = {
+  event: "started" | "progress" | "finished" | string;
+  progress: number;
+  downloadedBytes: number;
+  totalBytes?: number | null;
+  completedSegments?: number | null;
+  totalSegments?: number | null;
+  fileName?: string | null;
+};
+
+export type DownloadResult = {
+  filePath: string;
+  fileName: string;
+  bytesDownloaded: number;
+  mediaKind: "direct" | "hls-ts" | string;
+};
+
+export type EpisodeDownloadState = {
+  status: "preparing" | "downloading" | "complete" | "error";
+  progress: number;
+  message?: string;
+  filePath?: string;
+  fileName?: string;
+};
+
 export type PlayerContext = {
   anime: Anime;
   episode: Episode;
