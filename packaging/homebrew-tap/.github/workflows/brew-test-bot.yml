@@ -13,12 +13,20 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: read
+
+concurrency:
+  group: brew-test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   syntax:
     name: Tap syntax and cask audit
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Link checkout as tap
         run: |
@@ -47,8 +55,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.full_validation
     runs-on: macos-latest
     needs: syntax
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Link checkout as tap
         run: |

@@ -9,6 +9,11 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
+use tokio::time::timeout;
+
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const DOWNLOAD_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const DOWNLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,9 +105,10 @@ pub async fn download_episode(
         }
     };
 
-    fs::rename(&partial, &destination)
-        .await
-        .with_context(|| format!("Could not finish {}", destination.display()))?;
+    if let Err(error) = fs::rename(&partial, &destination).await {
+        let _ = fs::remove_file(&partial).await;
+        return Err(error).with_context(|| format!("Could not finish {}", destination.display()));
+    }
 
     send_event(
         on_event,
@@ -134,13 +140,22 @@ fn build_client(stream: &StreamInfo) -> Result<Client> {
         );
     }
 
-    let allow_invalid_certs = stream.video_url.contains("mp4upload.com");
+    let source_url = Url::parse(&stream.video_url).context("Stream URL is invalid")?;
+    let allow_invalid_certs = is_mp4upload_host(&source_url);
     Client::builder()
-        .connect_timeout(Duration::from_secs(20))
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(DOWNLOAD_REQUEST_TIMEOUT)
         .default_headers(headers)
         .danger_accept_invalid_certs(allow_invalid_certs)
         .build()
         .context("Could not create the download client")
+}
+
+fn is_mp4upload_host(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("mp4upload.com")
+            || host.to_ascii_lowercase().ends_with(".mp4upload.com")
+    })
 }
 
 async fn download_direct(
@@ -162,9 +177,9 @@ async fn download_direct(
         .with_context(|| format!("Could not create {}", partial.display()))?;
     let mut downloaded = 0_u64;
 
-    while let Some(chunk) = response
-        .chunk()
+    while let Some(chunk) = timeout(DOWNLOAD_READ_IDLE_TIMEOUT, response.chunk())
         .await
+        .context("Media download stalled while waiting for data")?
         .context("Media download was interrupted")?
     {
         file.write_all(&chunk)
@@ -328,28 +343,28 @@ fn join_playlist_url(base: &Url, value: &str) -> Result<Url> {
 }
 
 async fn fetch_text(client: &Client, url: Url) -> Result<String> {
-    client
-        .get(url)
-        .send()
+    let response = timeout(DOWNLOAD_READ_IDLE_TIMEOUT, client.get(url).send())
         .await
+        .context("Timed out while fetching the HLS playlist")?
         .context("Could not fetch the HLS playlist")?
         .error_for_status()
-        .context("The HLS host rejected the playlist request")?
-        .text()
+        .context("The HLS host rejected the playlist request")?;
+    timeout(DOWNLOAD_READ_IDLE_TIMEOUT, response.text())
         .await
+        .context("Timed out while reading the HLS playlist")?
         .context("Could not read the HLS playlist")
 }
 
 async fn fetch_bytes(client: &Client, url: Url, label: &str) -> Result<Vec<u8>> {
-    Ok(client
-        .get(url)
-        .send()
+    let response = timeout(DOWNLOAD_READ_IDLE_TIMEOUT, client.get(url).send())
         .await
+        .with_context(|| format!("Timed out while fetching {label}"))?
         .with_context(|| format!("Could not fetch {label}"))?
         .error_for_status()
-        .with_context(|| format!("The media host rejected an {label} request"))?
-        .bytes()
+        .with_context(|| format!("The media host rejected a {label} request"))?;
+    Ok(timeout(DOWNLOAD_READ_IDLE_TIMEOUT, response.bytes())
         .await
+        .with_context(|| format!("Timed out while reading {label}"))?
         .with_context(|| format!("Could not read {label}"))?
         .to_vec())
 }
@@ -375,13 +390,18 @@ async fn destination_path(
         .filter(|title| !title.trim().is_empty())
         .map(sanitize_file_component);
     let stem = match episode_title {
-        Some(title) if title != format!("Episode {}", request.episode_number) => {
+        Some(title) if !is_generic_episode_title(&title, request.episode_number) => {
             format!("E{:02} - {}", request.episode_number, title)
         }
         _ => format!("Episode {:02}", request.episode_number),
     };
 
     unique_path(&root, &stem, extension).await
+}
+
+fn is_generic_episode_title(title: &str, episode_number: u32) -> bool {
+    title.eq_ignore_ascii_case(&format!("Episode {episode_number}"))
+        || title.eq_ignore_ascii_case(&format!("Episode {episode_number:02}"))
 }
 
 async fn unique_path(directory: &Path, stem: &str, extension: &str) -> Result<PathBuf> {
@@ -473,6 +493,30 @@ mod tests {
             "One Piece Episode 1 The Start"
         );
         assert_eq!(sanitize_file_component("..."), "ani-desk");
+    }
+
+    #[test]
+    fn only_relaxes_tls_for_mp4upload_hosts() {
+        assert!(is_mp4upload_host(
+            &Url::parse("https://mp4upload.com/video/123").unwrap()
+        ));
+        assert!(is_mp4upload_host(
+            &Url::parse("https://cdn.mp4upload.com/video/123").unwrap()
+        ));
+        assert!(!is_mp4upload_host(
+            &Url::parse("https://example.com/video?next=mp4upload.com").unwrap()
+        ));
+        assert!(!is_mp4upload_host(
+            &Url::parse("https://mp4upload.com.evil.example/video").unwrap()
+        ));
+    }
+
+    #[test]
+    fn recognizes_padded_and_unpadded_generic_episode_titles() {
+        assert!(is_generic_episode_title("Episode 1", 1));
+        assert!(is_generic_episode_title("Episode 01", 1));
+        assert!(is_generic_episode_title("episode 01", 1));
+        assert!(!is_generic_episode_title("A New Beginning", 1));
     }
 
     #[test]

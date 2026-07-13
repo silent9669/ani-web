@@ -50,6 +50,17 @@ def test_t1_dashboard_search_button(mocked_page):
     trigger = mocked_page.locator(".hero-search-trigger")
     expect(trigger).to_be_visible()
 
+def test_t1_dashboard_uses_modern_glass_surfaces(mocked_page):
+    style = mocked_page.locator(".home-command-center").evaluate("""node => {
+        const value = getComputedStyle(node);
+        return {
+            radius: parseFloat(value.borderTopLeftRadius),
+            backdrop: value.backdropFilter || value.webkitBackdropFilter,
+        };
+    }""")
+    assert style["radius"] >= 20
+    assert style["backdrop"] != "none"
+
 def test_t1_dashboard_no_page_scroll(mocked_page):
     mocked_page.set_viewport_size({"width": 1440, "height": 900})
     scroll = mocked_page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight")
@@ -87,6 +98,16 @@ def test_t1_search_input(mocked_page):
     search_input = mocked_page.locator(".search-input-shell input")
     search_input.fill("Naruto")
     expect(search_input).to_have_value("Naruto")
+
+def test_t1_search_idle_banner_and_suggestion(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    welcome = mocked_page.locator(".search-welcome")
+    expect(welcome).to_be_visible()
+    expect(welcome.locator("img")).to_be_visible()
+    expect(welcome).to_contain_text("Find the story you want tonight")
+    welcome.get_by_role("button", name="One Piece").click()
+    expect(mocked_page.locator(".search-input-shell input")).to_have_value("One Piece")
+    mocked_page.wait_for_selector(".search-result")
 
 def test_t1_search_provider_chips(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
@@ -230,6 +251,31 @@ def test_t1_episode_download_completes_without_opening_player(mocked_page):
     }""")
     assert stored["episodeNumber"] == 1
     assert stored["animeTitle"] == "Naruto Shippuden"
+
+def test_t1_episode_download_keyboard_does_not_start_playback(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    mocked_page.locator(".detail-actions button.primary").click()
+    download = mocked_page.locator(".episode-download-button").first
+    download.focus()
+    mocked_page.keyboard.press("Enter")
+    expect(download).to_have_class("episode-download-button complete")
+    expect(mocked_page.locator("video")).to_have_count(0)
+
+def test_t1_episode_action_columns_are_fixed(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    mocked_page.locator(".detail-actions button.primary").click()
+    row = mocked_page.locator(".episode-list-row").first
+    columns = row.evaluate("""node => ({
+        download: getComputedStyle(node.querySelector('.episode-download-button')).gridColumnStart,
+        play: getComputedStyle(node.querySelector('.episode-play-icon')).gridColumnStart,
+    })""")
+    assert columns == {"download": "4", "play": "5"}
 
 
 # Liquid Glass Features (5 tests)
@@ -722,6 +768,19 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     expect(mocked_page.locator(".player-now-playing")).to_contain_text("Naruto Shippuden")
     expect(mocked_page.locator(".player-timeline")).to_be_visible()
     expect(mocked_page.locator(".player-utility-pill")).to_be_visible()
+
+    safe_zone = mocked_page.locator(".player-now-playing").evaluate("""node => {
+        const rect = node.getBoundingClientRect();
+        return {
+            left: rect.left,
+            right: rect.right,
+            midpoint: window.innerWidth / 2,
+            titleSize: parseFloat(getComputedStyle(node.querySelector('strong')).fontSize),
+        };
+    }""")
+    assert safe_zone["left"] < 80
+    assert safe_zone["right"] < safe_zone["midpoint"]
+    assert safe_zone["titleSize"] <= 24
 
 def test_t3_my_list_nav_and_remove(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()

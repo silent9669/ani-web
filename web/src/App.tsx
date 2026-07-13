@@ -19,6 +19,7 @@ import {
   SkipBack,
   SkipForward,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Trash2,
   X,
@@ -1017,6 +1018,7 @@ function HomeDashboard({
         <motion.div className="home-command-brand" variants={fadeUpVariant}>
           <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
           <div>
+            <p className="home-command-kicker"><Sparkles size={14} /> Your red-carpet watchlist</p>
             <span>ani-desk</span>
             <small>Discover. Choose a source. Watch.</small>
           </div>
@@ -1033,6 +1035,7 @@ function HomeDashboard({
             <span>{query.trim() || "Search anime, films, OVAs..."}</span>
             {loading ? <Loader2 className="spin" size={18} /> : <ChevronRight size={19} />}
           </motion.button>
+          <p className="home-command-hint">Pick a language, choose a provider, and keep the same search while you compare sources.</p>
         </motion.div>
       </motion.div>
 
@@ -1519,6 +1522,56 @@ function SearchStage({
             )}
           </div>
         </aside>
+      )}
+
+      {query.trim().length < 2 && !recoverySource && (
+        <motion.section
+          className="search-welcome"
+          initial={{ opacity: 0, y: 18, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10, scale: 0.99 }}
+          transition={{ type: "spring", stiffness: 300, damping: 30, mass: 0.85 }}
+        >
+          <div className="search-welcome-brand">
+            <div className="search-welcome-logo-wrap">
+              <img src={LOGO_SRC} alt="ani-desk" />
+            </div>
+            <div className="search-welcome-copy">
+              <p className="search-welcome-kicker"><Sparkles size={15} /> Search across your favorite sources</p>
+              <h1>Find the story you want tonight.</h1>
+              <p>Start with two letters. ani-desk keeps your query in place while you switch language and provider.</p>
+              <div className="search-suggestions" aria-label="Search suggestions">
+                {["One Piece", "Naruto", "Your Name"].map((suggestion) => (
+                  <button
+                    type="button"
+                    key={suggestion}
+                    onClick={() => {
+                      onQueryChange(suggestion);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <Search size={15} />
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="search-tip-grid">
+            <article>
+              <Film size={19} />
+              <div><strong>Search provider-first</strong><span>Choose the source you trust, then compare without retyping.</span></div>
+            </article>
+            <article>
+              <SlidersHorizontal size={19} />
+              <div><strong>Match your subtitles</strong><span>Switch between English and Vietnamese before opening a title.</span></div>
+            </article>
+            <article>
+              <Download size={19} />
+              <div><strong>Save an episode</strong><span>Open a result and use the download control beside any episode.</span></div>
+            </article>
+          </div>
+        </motion.section>
       )}
 
       {query.trim().length >= 2 && (
@@ -2132,6 +2185,7 @@ function DetailPage({
                         onClick={() => onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
+                            if (event.target !== event.currentTarget) return;
                             event.preventDefault();
                             onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0);
                           }
