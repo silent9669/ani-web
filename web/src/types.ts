@@ -5,6 +5,8 @@ export type Source = {
   status: "healthy" | "degraded" | "unavailable" | "unknown" | string;
   failureCode?: string | null;
   capabilities: ProviderCapabilities;
+  websiteUrl?: string | null;
+  verificationUrl?: string | null;
 };
 
 export type ProviderCapabilities = {

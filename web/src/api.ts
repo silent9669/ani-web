@@ -19,6 +19,10 @@ export const api = {
   listProviderHealth: () => invoke<Source[]>("list_provider_health"),
   retryProviderHealth: (provider?: string) =>
     invoke<Source[]>("retry_provider_health", { provider }),
+  openProviderAccess: (provider: string) =>
+    invoke<void>("open_provider_access", { provider }),
+  completeProviderVerification: (provider: string) =>
+    invoke<Source[]>("complete_provider_verification", { provider }),
   getDiscovery: () => invoke<DiscoveryCatalog>("get_discovery"),
   getGenreCatalog: (genre: string) =>
     invoke<CatalogAnime[]>("get_genre_catalog", { genre }),

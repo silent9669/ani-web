@@ -70,6 +70,10 @@ impl AnimeProvider for KkphimProvider {
         vec!["🇻🇳".to_string()]
     }
 
+    fn website_url(&self) -> Option<&'static str> {
+        Some("https://www.kkphim.com")
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
         let search_url = format!("{}/tim-kiem", KKPHIM_API);
 

@@ -88,6 +88,15 @@ pub trait AnimeProvider: Send + Sync {
     fn name(&self) -> &str;
     fn language(&self) -> Language;
     fn supported_languages(&self) -> Vec<String>;
+    fn website_url(&self) -> Option<&'static str> {
+        None
+    }
+    fn verification_url(&self) -> Option<&'static str> {
+        None
+    }
+    async fn apply_verification_cookies(&self, _cookie_header: String) -> Result<()> {
+        Ok(())
+    }
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities::default()
     }
@@ -125,10 +134,6 @@ impl ProviderRegistry {
             providers.push(Arc::new(animegg::AnimeGgProvider::new()));
         }
 
-        if config.sources.moviebox {
-            providers.push(Arc::new(moviebox::MovieBoxProvider::new()));
-        }
-
         if config.sources.hianime {
             providers.push(Arc::new(hianime::HiAnimeProvider::new()));
         }
@@ -142,20 +147,6 @@ impl ProviderRegistry {
         // 3. OPhim
         if config.sources.ophim {
             providers.push(Arc::new(ophim::OphimProvider::new()));
-        }
-
-        if config.sources.animevietsub {
-            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::new()));
-        }
-        if config.sources.animetvn {
-            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::for_provider(
-                "AnimeTVN", "ANIMETVN",
-            )));
-        }
-        if config.sources.niniyo {
-            providers.push(Arc::new(animevietsub::AnimeVietSubProvider::for_provider(
-                "Niniyo", "NINIYO",
-            )));
         }
 
         Self { providers }
@@ -213,12 +204,33 @@ pub fn parse_episode_number(name: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_episode_number;
+    use super::{parse_episode_number, ProviderRegistry};
+    use crate::config::Config;
 
     #[test]
     fn episode_parser_does_not_merge_decimal_specials() {
         assert_eq!(parse_episode_number("Tập 1004.5"), 1004);
         assert_eq!(parse_episode_number("Episode 1167"), 1167);
         assert_eq!(parse_episode_number("Full"), 1);
+    }
+
+    #[test]
+    fn registry_omits_retired_and_duplicate_sources() {
+        let mut config = Config::default();
+        config.sources.moviebox = true;
+        config.sources.animevietsub = true;
+        config.sources.animetvn = true;
+        config.sources.niniyo = true;
+        let registry = ProviderRegistry::new(&config);
+        let names = registry
+            .list_providers()
+            .iter()
+            .map(|provider| provider.name())
+            .collect::<Vec<_>>();
+
+        assert!(!names.contains(&"MovieBox"));
+        assert!(!names.contains(&"AnimeVietSub"));
+        assert!(!names.contains(&"AnimeTVN"));
+        assert!(!names.contains(&"Niniyo"));
     }
 }

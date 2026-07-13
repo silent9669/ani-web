@@ -21,6 +21,7 @@ use uuid::Uuid;
 pub struct ProxyState {
     base_url: String,
     client: Client,
+    insecure_client: Client,
     sessions: Arc<RwLock<HashMap<String, ProxySession>>>,
 }
 
@@ -28,6 +29,7 @@ pub struct ProxyState {
 struct ProxySession {
     stream_url: String,
     headers: HashMap<String, String>,
+    allow_invalid_certs: bool,
 }
 
 pub struct PlaybackSession {
@@ -54,6 +56,11 @@ impl ProxyState {
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .build()
                 .context("Failed to create proxy HTTP client")?,
+            insecure_client: Client::builder()
+                .redirect(reqwest::redirect::Policy::limited(10))
+                .danger_accept_invalid_certs(true)
+                .build()
+                .context("Failed to create fallback proxy HTTP client")?,
             sessions: Arc::new(RwLock::new(HashMap::new())),
         };
 
@@ -90,6 +97,7 @@ impl ProxyState {
             ProxySession {
                 stream_url: stream.video_url.clone(),
                 headers: stream.headers.clone(),
+                allow_invalid_certs: requires_insecure_tls(stream),
             },
         );
 
@@ -175,7 +183,12 @@ async fn proxy_url(
     url: &str,
     incoming_headers: &HeaderMap,
 ) -> Response<Body> {
-    let mut request = state.client.get(url);
+    let client = if session.allow_invalid_certs {
+        &state.insecure_client
+    } else {
+        &state.client
+    };
+    let mut request = client.get(url);
     for (key, value) in &session.headers {
         request = request.header(key.as_str(), value.as_str());
     }
@@ -259,6 +272,16 @@ async fn proxy_url(
         },
         Body::from_stream(response.bytes_stream()),
     )
+}
+
+fn requires_insecure_tls(stream: &StreamInfo) -> bool {
+    stream.video_url.contains("mp4upload.com")
+        || stream.headers.values().any(|value| {
+            Url::parse(value)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+                .is_some_and(|host| host == "mp4upload.com" || host.ends_with(".mp4upload.com"))
+        })
 }
 
 fn rewrite_playlist(
@@ -447,6 +470,98 @@ fn text_response(status: StatusCode, message: &str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ani_desk_core::providers::{allanime::AllAnimeProvider, AnimeProvider};
+
+    #[test]
+    fn limits_invalid_certificate_fallback_to_mp4upload_sessions() {
+        let normal = StreamInfo {
+            video_url: "https://cdn.example.com/video.mp4".into(),
+            subtitles: Vec::new(),
+            qualities: Vec::new(),
+            headers: HashMap::new(),
+        };
+        assert!(!requires_insecure_tls(&normal));
+
+        let mut mp4upload = normal.clone();
+        mp4upload.video_url = "https://a4.mp4upload.com/video.mp4".into();
+        assert!(requires_insecure_tls(&mp4upload));
+
+        let mut redirected = normal;
+        redirected
+            .headers
+            .insert("Referer".into(), "https://www.mp4upload.com/".into());
+        assert!(requires_insecure_tls(&redirected));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live AllAnime and mp4upload network access"]
+    async fn live_allanime_episode_plays_through_local_proxy() -> Result<()> {
+        let provider = AllAnimeProvider::new();
+        let anime = provider
+            .search("One Piece: Gyojin Tou-hen")
+            .await?
+            .into_iter()
+            .find(|anime| anime.title == "One Piece: Gyojin Tou-hen")
+            .context("AllAnime title was not found")?;
+        let episode = provider
+            .get_episodes(&anime.id)
+            .await?
+            .into_iter()
+            .find(|episode| episode.number == 1)
+            .context("AllAnime episode 1 was not found")?;
+        let stream = provider.get_stream_url(&episode.id).await?;
+
+        let proxy = ProxyState::start().await?;
+        let session = proxy.create_session(&stream).await?;
+        let mut response = Client::new().get(session.playback_url).send().await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "local playback proxy returned HTTP {}",
+            response.status()
+        );
+        let content_type = response
+            .headers()
+            .get(reqwest_header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if content_type.contains("mpegurl") {
+            let playlist = response.text().await?;
+            anyhow::ensure!(
+                playlist.starts_with("#EXTM3U"),
+                "proxy returned invalid HLS"
+            );
+            let resource_url = playlist
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with('#'))
+                .context("proxy HLS playlist contained no resource")?;
+            let mut resource = Client::new().get(resource_url).send().await?;
+            anyhow::ensure!(
+                resource.status().is_success(),
+                "proxy HLS resource returned HTTP {}",
+                resource.status()
+            );
+            let first_chunk = resource
+                .chunk()
+                .await?
+                .context("proxy HLS resource returned an empty body")?;
+            anyhow::ensure!(!first_chunk.is_empty(), "proxy HLS resource was empty");
+        } else {
+            anyhow::ensure!(
+                content_type.starts_with("video/") || content_type == "application/octet-stream",
+                "local playback proxy returned {content_type}"
+            );
+            let first_chunk = response
+                .chunk()
+                .await?
+                .context("local playback proxy returned an empty body")?;
+            anyhow::ensure!(
+                !first_chunk.is_empty(),
+                "local playback proxy returned no media"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn rewrites_playlist_segments_and_keys() {

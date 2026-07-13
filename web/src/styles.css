@@ -1049,7 +1049,7 @@ main {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 1rem;
   overflow: hidden;
   padding: 1rem clamp(1rem, 3vw, 2.8rem);
@@ -2812,6 +2812,40 @@ main {
 .health-dot.healthy { background: var(--green); }
 .health-dot.degraded { background: var(--amber); }
 .health-dot.unavailable { background: var(--red); }
+
+.provider-recovery {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  border: 1px solid rgba(255, 181, 65, 0.32);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem;
+  background: linear-gradient(90deg, rgba(255, 181, 65, 0.12), rgba(18, 11, 14, 0.92));
+  box-shadow: 0 0.9rem 2.4rem rgba(0, 0, 0, 0.22);
+}
+
+.provider-recovery-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 181, 65, 0.14);
+  color: #ffc05a;
+}
+
+.provider-recovery strong { color: var(--text); font-size: 0.9rem; }
+.provider-recovery p { margin: 0.22rem 0 0; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.provider-recovery-actions { display: flex; gap: 0.55rem; }
+.provider-recovery-actions button { display: inline-flex; align-items: center; gap: 0.42rem; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .provider-recovery { grid-template-columns: auto minmax(0, 1fr); }
+  .provider-recovery-actions { grid-column: 1 / -1; flex-wrap: wrap; }
+}
 
 .provider-chip:disabled:hover {
   transform: none;
