@@ -12,7 +12,13 @@ const required = [
   'src-tauri/icons/Square44x44Logo.png',
   'src-tauri/icons/Square150x150Logo.png',
   'src-tauri/icons/StoreLogo.png',
-  'web/public/logo.png'
+  'web/public/logo.png',
+  'web/public/favicon.ico',
+  'web/public/favicon-16x16.png',
+  'web/public/favicon-32x32.png',
+  'web/public/apple-touch-icon.png',
+  'web/public/web-app-192.png',
+  'web/public/web-app-512.png'
 ];
 
 const missing = required.filter((path) => {

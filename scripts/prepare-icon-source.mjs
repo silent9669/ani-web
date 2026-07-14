@@ -16,9 +16,84 @@ mkdirSync(dirname(iconSourcePath), { recursive: true });
 mkdirSync(dirname(publicLogoPath), { recursive: true });
 writeFileSync(iconSourcePath, writePng(iconSize, iconSize, icon));
 copyFileSync(inputPath, publicLogoPath);
+writeWebIcons(icon);
 
 console.log(`Prepared ${iconSourcePath} from ${inputPath} (${source.width}x${source.height} -> ${iconSize}x${iconSize}, artwork fill ${Math.round(iconArtworkFill * 100)}%).`);
 console.log(`Refreshed ${publicLogoPath} from ${inputPath}.`);
+console.log('Refreshed browser favicon, Apple touch icon, and installable web icons.');
+
+function writeWebIcons(sourceRgba) {
+  const sizes = [16, 32, 180, 192, 512];
+  const pngs = new Map(
+    sizes.map((size) => {
+      const rgba = resizeSquare(sourceRgba, iconSize, size);
+      return [size, writePng(size, size, rgba)];
+    }),
+  );
+
+  writeFileSync('web/public/favicon-16x16.png', pngs.get(16));
+  writeFileSync('web/public/favicon-32x32.png', pngs.get(32));
+  writeFileSync('web/public/apple-touch-icon.png', pngs.get(180));
+  writeFileSync('web/public/web-app-192.png', pngs.get(192));
+  writeFileSync('web/public/web-app-512.png', pngs.get(512));
+  writeFileSync('web/public/favicon.ico', writeIco([pngs.get(16), pngs.get(32)], [16, 32]));
+}
+
+function resizeSquare(source, sourceSize, targetSize) {
+  const output = Buffer.alloc(targetSize * targetSize * 4);
+  const scale = sourceSize / targetSize;
+  for (let y = 0; y < targetSize; y += 1) {
+    const sourceTop = y * scale;
+    const sourceBottom = Math.min(sourceSize, (y + 1) * scale);
+    for (let x = 0; x < targetSize; x += 1) {
+      const sourceLeft = x * scale;
+      const sourceRight = Math.min(sourceSize, (x + 1) * scale);
+      const totals = [0, 0, 0, 0];
+      let totalWeight = 0;
+
+      for (let sourceY = Math.floor(sourceTop); sourceY < Math.ceil(sourceBottom); sourceY += 1) {
+        const verticalWeight = Math.min(sourceBottom, sourceY + 1) - Math.max(sourceTop, sourceY);
+        for (let sourceX = Math.floor(sourceLeft); sourceX < Math.ceil(sourceRight); sourceX += 1) {
+          const horizontalWeight = Math.min(sourceRight, sourceX + 1) - Math.max(sourceLeft, sourceX);
+          const weight = horizontalWeight * verticalWeight;
+          const sourceIndex = (sourceY * sourceSize + sourceX) * 4;
+          for (let channel = 0; channel < 4; channel += 1) {
+            totals[channel] += source[sourceIndex + channel] * weight;
+          }
+          totalWeight += weight;
+        }
+      }
+
+      const outputIndex = (y * targetSize + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        output[outputIndex + channel] = Math.round(totals[channel] / totalWeight);
+      }
+    }
+  }
+  return output;
+}
+
+function writeIco(images, sizes) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  const entries = Buffer.alloc(images.length * 16);
+  let offset = header.length + entries.length;
+  images.forEach((image, index) => {
+    const entry = index * 16;
+    entries[entry] = sizes[index] === 256 ? 0 : sizes[index];
+    entries[entry + 1] = sizes[index] === 256 ? 0 : sizes[index];
+    entries[entry + 2] = 0;
+    entries[entry + 3] = 0;
+    entries.writeUInt16LE(1, entry + 4);
+    entries.writeUInt16LE(32, entry + 6);
+    entries.writeUInt32LE(image.length, entry + 8);
+    entries.writeUInt32LE(offset, entry + 12);
+    offset += image.length;
+  });
+  return Buffer.concat([header, entries, ...images]);
+}
 
 function makeAppIcon(sourceImage) {
   const background = sampleBackground(sourceImage);

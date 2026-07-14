@@ -135,6 +135,33 @@ def test_t1_search_provider_chips(mocked_page):
     }""")
     assert spacing_ok is True
 
+def test_t1_narrow_mobile_search_scrolls_without_overlap(mobile_mocked_page):
+    mobile_mocked_page.set_viewport_size({"width": 330, "height": 715})
+    mobile_mocked_page.locator(".hero-search-trigger").click()
+    expect(mobile_mocked_page.locator(".search-welcome")).to_be_visible()
+    expect(mobile_mocked_page.locator(".search-suggestions")).to_be_visible()
+    expect(mobile_mocked_page.locator(".search-tip-grid")).to_be_visible()
+    mobile_mocked_page.wait_for_timeout(600)
+
+    metrics = mobile_mocked_page.evaluate("""() => {
+        const shell = document.querySelector('.app-shell.route-search');
+        const suggestions = document.querySelector('.search-suggestions');
+        const tips = document.querySelector('.search-tip-grid');
+        return {
+            viewport: window.innerWidth,
+            page: document.documentElement.scrollWidth,
+            shellClientHeight: shell?.clientHeight ?? 0,
+            shellScrollHeight: shell?.scrollHeight ?? 0,
+            suggestionsBottom: suggestions?.getBoundingClientRect().bottom ?? 0,
+            tipsTop: tips?.getBoundingClientRect().top ?? 0,
+        };
+    }""")
+
+    assert metrics["viewport"] == 330
+    assert metrics["page"] <= metrics["viewport"]
+    assert metrics["shellScrollHeight"] > metrics["shellClientHeight"]
+    assert metrics["suggestionsBottom"] <= metrics["tipsTop"]
+
 def test_t1_search_results_pane(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
     mocked_page.locator(".search-input-shell input").fill("Naruto")
