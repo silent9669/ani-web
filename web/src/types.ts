@@ -74,6 +74,22 @@ export type AppError = {
   technical?: string | null;
 };
 
+export type SessionUser = {
+  id: string;
+  username: string;
+  role: "admin" | "user";
+  hosted: boolean;
+};
+
+export type ManagedUser = {
+  id: string;
+  username: string;
+  role: "admin" | "user";
+  enabled: boolean;
+  protected: boolean;
+  createdAt: string;
+};
+
 export type Anime = {
   id: string;
   catalogId?: number | null;
@@ -143,15 +159,41 @@ export type DownloadEvent = {
 };
 
 export type DownloadResult = {
+  id: string;
   filePath: string;
   fileName: string;
   bytesDownloaded: number;
   mediaKind: "direct" | "hls-ts" | string;
 };
 
+export type DownloadRecord = {
+  id: string;
+  provider: string;
+  animeId: string;
+  animeTitle: string;
+  coverUrl: string;
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle?: string | null;
+  filePath: string;
+  fileName: string;
+  bytesDownloaded: number;
+  mediaKind: "direct" | "hls-ts" | string;
+  completedAt: string;
+  fileExists: boolean;
+};
+
 export type EpisodeDownloadState = {
   status: "preparing" | "downloading" | "complete" | "error";
   progress: number;
+  downloadId?: string;
+  provider?: string;
+  animeId?: string;
+  animeTitle?: string;
+  coverUrl?: string;
+  episodeId?: string;
+  episodeNumber?: number;
+  episodeTitle?: string | null;
   message?: string;
   filePath?: string;
   fileName?: string;

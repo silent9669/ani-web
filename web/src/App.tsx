@@ -9,27 +9,35 @@ import {
   Copy,
   Download,
   Film,
+  FolderOpen,
+  HardDrive,
   Loader2,
+  LogOut,
   Maximize2,
   Pause,
   PictureInPicture2,
   Play,
   Plus,
   Search,
+  ShieldCheck,
   SkipBack,
   SkipForward,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Trash2,
+  UserPlus,
+  Users,
   X,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { animeKey, api, favoriteToAnime } from "./api";
+import { episodeLabel, episodeTitleDetail } from "./episode-label";
 import type {
   Anime,
   AnimeDetails,
@@ -37,12 +45,15 @@ import type {
   CatalogAnime,
   CatalogFilters,
   DiscoveryCatalog,
+  DownloadRecord,
   Episode,
   EpisodeDownloadState,
   Favorite,
+  ManagedUser,
   PlayerContext,
   ProviderAvailability,
   Source,
+  SessionUser,
   WatchHistory,
 } from "./types";
 import {
@@ -60,11 +71,13 @@ const fadeUpVariant = {
   show: { opacity: 1, y: 0 },
 };
 
-type Route = "home" | "my-list" | "continue" | "search" | "detail" | "catalog";
+type Route = "home" | "my-list" | "continue" | "downloads" | "admin" | "search" | "detail" | "catalog";
 type QualityLevel = { index: number; label: string; id?: string };
 type ShelfSort = "recent" | "title" | "provider";
 
 function App() {
+  const [session, setSession] = useState<SessionUser | null | undefined>(undefined);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [query, setQuery] = useState("");
@@ -83,6 +96,7 @@ function App() {
   const [myList, setMyList] = useState<Favorite[]>([]);
   const [player, setPlayer] = useState<PlayerContext | null>(null);
   const [episodeDownloads, setEpisodeDownloads] = useState<Record<string, EpisodeDownloadState>>({});
+  const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
@@ -152,10 +166,14 @@ function App() {
 
   async function bootstrap() {
     try {
-      const [sourceList, history, favorites] = await Promise.all([
+      const currentSession = await api.getSession();
+      setSession(currentSession);
+      if (!currentSession) return;
+      const [sourceList, history, favorites, downloadLibrary] = await Promise.all([
         api.listSources(),
         api.getContinueWatching(200),
         api.getMyList(300),
+        api.listDownloads(500),
       ]);
       const savedSourceName = loadSavedSourceName();
       const nextSource = sourceList.find((source) => source.name === savedSourceName) ?? sourceList[0] ?? null;
@@ -165,6 +183,7 @@ function App() {
       if (nextSource) saveSourceName(nextSource.name);
       setContinueWatching(history);
       setMyList(favorites);
+      setDownloads(downloadLibrary);
       void api.listProviderHealth().then((health) => {
         setSources(health);
         setSelectedSource((current) => health.find((source) => source.name === current?.name) ?? health[0] ?? null);
@@ -173,7 +192,9 @@ function App() {
         setDiscovery(catalog);
       }).catch((err) => setError(toAppError(err, "catalog")));
     } catch (err) {
-      setError(toAppError(err, "bootstrap"));
+      const appError = toAppError(err, "bootstrap");
+      setError(appError);
+      setAuthError(appError.message);
     } finally {
       setBootstrapping(false);
     }
@@ -186,6 +207,36 @@ function App() {
     ]);
     setContinueWatching(history);
     setMyList(favorites);
+  }
+
+  async function refreshDownloads() {
+    setDownloads(await api.listDownloads(500));
+  }
+
+  async function signIn(username: string, password: string) {
+    setAuthError(null);
+    setBootstrapping(true);
+    try {
+      await api.login(username, password);
+      await bootstrap();
+    } catch (err) {
+      setAuthError(toAppError(err, "login").message);
+      setBootstrapping(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await api.logout();
+    } finally {
+      setSession(null);
+      setRoute("home");
+      setRouteStack([]);
+      setSources([]);
+      setContinueWatching([]);
+      setMyList([]);
+      setDownloads([]);
+    }
   }
 
   async function checkAppUpdates() {
@@ -627,18 +678,32 @@ function App() {
     const key = episodeDownloadKey(anime, episode);
     const current = episodeDownloads[key];
     if (current?.status === "preparing" || current?.status === "downloading") return;
+    const downloadId = crypto.randomUUID();
+    const metadata = {
+      downloadId,
+      provider: anime.provider,
+      animeId: anime.id,
+      animeTitle: anime.title,
+      coverUrl: anime.coverUrl,
+      episodeId: episode.id,
+      episodeNumber: episode.number,
+      episodeTitle: episode.title,
+    };
 
     setEpisodeDownloads((items) => ({
       ...items,
-      [key]: { status: "preparing", progress: 0, message: "Preparing download..." },
+      [key]: { ...metadata, status: "preparing", progress: 0, message: "Preparing download..." },
     }));
 
     try {
       const result = await api.downloadEpisode(
         {
+          id: downloadId,
           provider: anime.provider,
+          animeId: anime.id,
           episodeId: episode.id,
           animeTitle: anime.title,
+          coverUrl: anime.coverUrl,
           episodeNumber: episode.number,
           episodeTitle: episode.title,
         },
@@ -651,6 +716,7 @@ function App() {
           setEpisodeDownloads((items) => ({
             ...items,
             [key]: {
+              ...metadata,
               status: event.event === "started" ? "preparing" : "downloading",
               progress: Math.max(0, Math.min(100, event.progress || 0)),
               message: event.event === "started" ? `Saving ${event.fileName || `Episode ${episode.number}`}...` : segmentProgress,
@@ -662,6 +728,8 @@ function App() {
       setEpisodeDownloads((items) => ({
         ...items,
         [key]: {
+          ...metadata,
+          downloadId: result.id,
           status: "complete",
           progress: 100,
           message: `Saved to ${result.filePath}`,
@@ -669,13 +737,44 @@ function App() {
           fileName: result.fileName,
         },
       }));
+      await refreshDownloads();
     } catch (err) {
       const appError = toAppError(err, "download");
       setEpisodeDownloads((items) => ({
         ...items,
-        [key]: { status: "error", progress: 0, message: appError.message },
+        [key]: { ...metadata, status: "error", progress: 0, message: appError.message },
       }));
       setError(appError);
+    }
+  }
+
+  async function openDownloadedFile(id: string) {
+    try {
+      await api.openDownload(id);
+    } catch (err) {
+      setError(toAppError(err, "downloads"));
+      await refreshDownloads().catch(() => undefined);
+    }
+  }
+
+  async function revealDownloadedFile(id: string) {
+    try {
+      await api.revealDownload(id);
+    } catch (err) {
+      setError(toAppError(err, "downloads"));
+      await refreshDownloads().catch(() => undefined);
+    }
+  }
+
+  async function deleteDownloadedFile(id: string) {
+    try {
+      await api.deleteDownload(id);
+      setDownloads((items) => items.filter((item) => item.id !== id));
+      setEpisodeDownloads((items) =>
+        Object.fromEntries(Object.entries(items).filter(([, item]) => item.downloadId !== id)),
+      );
+    } catch (err) {
+      setError(toAppError(err, "downloads"));
     }
   }
 
@@ -696,6 +795,10 @@ function App() {
 
   if (bootstrapping) {
     return <BootSplash />;
+  }
+
+  if (!session) {
+    return <LoginScreen error={authError ?? error?.message ?? null} onLogin={signIn} />;
   }
 
   return (
@@ -732,6 +835,11 @@ function App() {
                 onResumeHistory={(item) => void openHistoryItem(item)}
                 onShowHistory={continueWatching.length ? () => navigate("continue") : undefined}
                 onShowMyList={() => navigate("my-list")}
+                onShowDownloads={() => navigate("downloads")}
+                downloadCount={downloads.length}
+                session={session}
+                onShowAdmin={session.hosted && session.role === "admin" ? () => navigate("admin") : undefined}
+                onSignOut={session.hosted ? () => void signOut() : undefined}
                 myList={myList}
                 onToggleFavorite={toggleMyList}
                 onRemoveHistory={(item) => void removeHistoryItem(item)}
@@ -759,6 +867,23 @@ function App() {
               onRemove={(anime) => void removeFromMyList(anime)}
               onBack={goBack}
             />
+          )}
+
+          {route === "downloads" && (
+            <DownloadsPage
+              key="downloads"
+              downloads={downloads}
+              activeDownloads={episodeDownloads}
+              onBack={goBack}
+              onOpen={(id) => void openDownloadedFile(id)}
+              onReveal={(id) => void revealDownloadedFile(id)}
+              onDelete={(id) => void deleteDownloadedFile(id)}
+              onRefresh={() => void refreshDownloads()}
+            />
+          )}
+
+          {route === "admin" && session.hosted && session.role === "admin" && (
+            <AdminPage key="admin" currentUser={session} onBack={goBack} />
           )}
 
           {route === "catalog" && (
@@ -842,6 +967,63 @@ function App() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function LoginScreen({
+  error,
+  onLogin,
+}: {
+  error: string | null;
+  onLogin: (username: string, password: string) => Promise<void>;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  return (
+    <main className="login-screen">
+      <div className="login-ambient" />
+      <motion.section
+        className="login-card"
+        initial={{ opacity: 0, scale: 0.965, y: 18 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 280, damping: 28 }}
+      >
+        <div className="login-brand">
+          <img src={LOGO_SRC} alt="ani-desk" />
+          <div><span>ani-desk</span><small>Your anime, beautifully organized.</small></div>
+        </div>
+        <div className="login-copy">
+          <p className="eyebrow">Private watch space</p>
+          <h1>Welcome back.</h1>
+          <p>Sign in to sync My List and continue watching across your desktop and mobile browser.</p>
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!username.trim() || !password || submitting) return;
+            setSubmitting(true);
+            void onLogin(username.trim(), password).finally(() => setSubmitting(false));
+          }}
+        >
+          <label>
+            <span>Username</span>
+            <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          {error && <p className="login-error"><AlertTriangle size={16} /> {error}</p>}
+          <button className="primary" disabled={submitting || !username.trim() || !password}>
+            {submitting ? <Loader2 className="spin" size={18} /> : <ChevronRight size={18} />}
+            {submitting ? "Signing in…" : "Continue"}
+          </button>
+        </form>
+        <small className="login-footnote">Accounts are created by your ani-desk administrator.</small>
+      </motion.section>
+    </main>
   );
 }
 
@@ -977,6 +1159,11 @@ function HomeDashboard({
   onResumeHistory,
   onShowHistory,
   onShowMyList,
+  onShowDownloads,
+  downloadCount,
+  session,
+  onShowAdmin,
+  onSignOut,
   myList,
   onToggleFavorite,
   onRemoveHistory,
@@ -994,6 +1181,11 @@ function HomeDashboard({
   onResumeHistory: (item: WatchHistory) => void;
   onShowHistory?: () => void;
   onShowMyList: () => void;
+  onShowDownloads: () => void;
+  downloadCount: number;
+  session: SessionUser;
+  onShowAdmin?: () => void;
+  onSignOut?: () => void;
   myList: Favorite[];
   onToggleFavorite: (anime: Anime) => void;
   onRemoveHistory: (item: WatchHistory) => void;
@@ -1017,6 +1209,7 @@ function HomeDashboard({
         <motion.div className="home-command-brand" variants={fadeUpVariant}>
           <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
           <div>
+            <p className="home-command-kicker"><Sparkles size={14} /> Your red-carpet watchlist</p>
             <span>ani-desk</span>
             <small>Discover. Choose a source. Watch.</small>
           </div>
@@ -1033,6 +1226,13 @@ function HomeDashboard({
             <span>{query.trim() || "Search anime, films, OVAs..."}</span>
             {loading ? <Loader2 className="spin" size={18} /> : <ChevronRight size={19} />}
           </motion.button>
+          <p className="home-command-hint">Pick a language, choose a provider, and keep the same search while you compare sources.</p>
+          <div className="home-command-shortcuts">
+            <button onClick={onShowMyList}><Star size={16} /> My List</button>
+            {!session.hosted && <button onClick={onShowDownloads}><HardDrive size={16} /> Downloads <span>{downloadCount}</span></button>}
+            {onShowAdmin && <button onClick={onShowAdmin}><ShieldCheck size={16} /> Users</button>}
+            {onSignOut && <button onClick={onSignOut}><LogOut size={16} /> Sign out {session.username}</button>}
+          </div>
         </motion.div>
       </motion.div>
 
@@ -1521,6 +1721,56 @@ function SearchStage({
         </aside>
       )}
 
+      {query.trim().length < 2 && !recoverySource && (
+        <motion.section
+          className="search-welcome"
+          initial={{ opacity: 0, y: 18, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10, scale: 0.99 }}
+          transition={{ type: "spring", stiffness: 300, damping: 30, mass: 0.85 }}
+        >
+          <div className="search-welcome-brand">
+            <div className="search-welcome-logo-wrap">
+              <img src={LOGO_SRC} alt="ani-desk" />
+            </div>
+            <div className="search-welcome-copy">
+              <p className="search-welcome-kicker"><Sparkles size={15} /> Search across your favorite sources</p>
+              <h1>Find the story you want tonight.</h1>
+              <p>Start with two letters. ani-desk keeps your query in place while you switch language and provider.</p>
+              <div className="search-suggestions" aria-label="Search suggestions">
+                {["One Piece", "Naruto", "Your Name"].map((suggestion) => (
+                  <button
+                    type="button"
+                    key={suggestion}
+                    onClick={() => {
+                      onQueryChange(suggestion);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <Search size={15} />
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="search-tip-grid">
+            <article>
+              <Film size={19} />
+              <div><strong>Search provider-first</strong><span>Choose the source you trust, then compare without retyping.</span></div>
+            </article>
+            <article>
+              <SlidersHorizontal size={19} />
+              <div><strong>Match your subtitles</strong><span>Switch between English and Vietnamese before opening a title.</span></div>
+            </article>
+            <article>
+              <Download size={19} />
+              <div><strong>Save an episode</strong><span>Open a result and use the download control beside any episode.</span></div>
+            </article>
+          </div>
+        </motion.section>
+      )}
+
       {query.trim().length >= 2 && (
         <div className="search-layout">
           <aside className="search-results-pane">
@@ -1739,6 +1989,268 @@ function MyListPage({
   );
 }
 
+function DownloadsPage({
+  downloads,
+  activeDownloads,
+  onBack,
+  onOpen,
+  onReveal,
+  onDelete,
+  onRefresh,
+}: {
+  downloads: DownloadRecord[];
+  activeDownloads: Record<string, EpisodeDownloadState>;
+  onBack: () => void;
+  onOpen: (id: string) => void;
+  onReveal: (id: string) => void;
+  onDelete: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const active = Object.entries(activeDownloads)
+    .filter(([, item]) => item.status !== "complete")
+    .map(([key, item]) => ({ key, ...item }));
+  const totalBytes = downloads.reduce((total, item) => total + item.bytesDownloaded, 0);
+  const availableCount = downloads.filter((item) => item.fileExists).length;
+
+  return (
+    <motion.section
+      className="downloads-page"
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+    >
+      <header className="downloads-header">
+        <IconButton label="Back" onClick={onBack}>
+          <ArrowLeft size={21} />
+        </IconButton>
+        <div>
+          <p className="eyebrow">Offline library</p>
+          <h1>Downloads</h1>
+          <p>Episodes saved on this device, ready without opening a provider again.</p>
+        </div>
+        <button className="downloads-refresh" onClick={onRefresh}>
+          <HardDrive size={17} /> Refresh library
+        </button>
+      </header>
+
+      <div className="download-summary-grid">
+        <article>
+          <span>On this device</span>
+          <strong>{availableCount}</strong>
+          <small>{downloads.length === availableCount ? "All files available" : `${downloads.length - availableCount} file${downloads.length - availableCount === 1 ? "" : "s"} missing`}</small>
+        </article>
+        <article>
+          <span>Storage used</span>
+          <strong>{formatBytes(totalBytes)}</strong>
+          <small>Managed inside your ani-desk Downloads folder</small>
+        </article>
+        <article>
+          <span>Activity</span>
+          <strong>{active.length || "Quiet"}</strong>
+          <small>{active.length ? `${active.length} transfer${active.length === 1 ? "" : "s"} need attention` : "No active transfers"}</small>
+        </article>
+      </div>
+
+      {active.length > 0 && (
+        <section className="download-section">
+          <div className="download-section-heading">
+            <div><p className="eyebrow">Transfer center</p><h2>In progress</h2></div>
+            <span>{active.length}</span>
+          </div>
+          <div className="download-active-list">
+            {active.map((item) => (
+              <article className={`download-active-card ${item.status}`} key={item.key}>
+                <div className="download-cover">
+                  <img src={item.coverUrl || LOGO_SRC} alt="" />
+                  {item.status === "error" ? <AlertTriangle size={20} /> : <Download size={20} />}
+                </div>
+                <div className="download-copy">
+                  <span>{item.provider || "ani-desk"}</span>
+                  <strong>{item.animeTitle || "Preparing episode"}</strong>
+                  <small>{episodeLabel(item.episodeNumber ?? 0, item.episodeTitle)}</small>
+                  <div className="download-progress-track"><i style={{ width: `${item.progress}%` }} /></div>
+                  <p>{item.message || (item.status === "error" ? "Download needs attention" : "Downloading…")}</p>
+                </div>
+                <b>{Math.round(item.progress)}%</b>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="download-section completed-downloads">
+        <div className="download-section-heading">
+          <div><p className="eyebrow">Local episodes</p><h2>Completed</h2></div>
+          <span>{downloads.length}</span>
+        </div>
+        {downloads.length ? (
+          <div className="download-library-list">
+            {downloads.map((item) => (
+              <motion.article layout className={item.fileExists ? "download-library-row" : "download-library-row missing"} key={item.id}>
+                <img src={item.coverUrl || LOGO_SRC} alt="" />
+                <div className="download-library-copy">
+                  <span>{item.provider} · {formatDownloadDate(item.completedAt)}</span>
+                  <strong>{item.animeTitle}</strong>
+                  <small>{episodeLabel(item.episodeNumber, item.episodeTitle)} · {formatBytes(item.bytesDownloaded)}</small>
+                  {!item.fileExists && <em>File moved or removed outside ani-desk</em>}
+                </div>
+                <div className="download-library-actions">
+                  <button className="primary" disabled={!item.fileExists} onClick={() => onOpen(item.id)}>
+                    <Play size={16} fill="currentColor" /> Play
+                  </button>
+                  <button disabled={!item.fileExists} onClick={() => onReveal(item.id)} title="Show in Finder or Explorer">
+                    <FolderOpen size={17} /> <span>Show</span>
+                  </button>
+                  <button
+                    className={deleteConfirmation === item.id ? "danger confirm" : "danger"}
+                    onClick={() => {
+                      if (deleteConfirmation === item.id) {
+                        onDelete(item.id);
+                        setDeleteConfirmation(null);
+                      } else {
+                        setDeleteConfirmation(item.id);
+                      }
+                    }}
+                    title="Delete local file"
+                  >
+                    <Trash2 size={17} /> <span>{deleteConfirmation === item.id ? "Delete?" : "Delete"}</span>
+                  </button>
+                </div>
+              </motion.article>
+            ))}
+          </div>
+        ) : (
+          <div className="downloads-empty">
+            <div><Download size={28} /></div>
+            <h3>No offline episodes yet</h3>
+            <p>Open an anime and use its download button. Finished episodes will collect here automatically.</p>
+          </div>
+        )}
+      </section>
+    </motion.section>
+  );
+}
+
+function AdminPage({ currentUser, onBack }: { currentUser: SessionUser; onBack: () => void }) {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("user");
+  const [creating, setCreating] = useState(false);
+
+  async function loadUsers() {
+    setLoading(true);
+    try {
+      setUsers(await api.listUsers());
+      setMessage(null);
+    } catch (err) {
+      setMessage(toAppError(err, "admin-users").message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadUsers(); }, []);
+
+  async function createAccount(event: FormEvent) {
+    event.preventDefault();
+    if (creating) return;
+    setCreating(true);
+    setMessage(null);
+    try {
+      await api.createUser({ username: username.trim(), password, role });
+      setUsername("");
+      setPassword("");
+      setRole("user");
+      await loadUsers();
+    } catch (err) {
+      setMessage(toAppError(err, "admin-users").message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <motion.section className="admin-page" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
+      <header className="admin-header">
+        <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
+        <div><p className="eyebrow">Administrator</p><h1>People & access</h1><p>Create accounts and control who can use this ani-desk web space.</p></div>
+        <div className="admin-current-user"><ShieldCheck size={17} /><span>{currentUser.username}</span><small>Administrator</small></div>
+      </header>
+
+      <div className="admin-layout">
+        <form className="admin-create-card" onSubmit={(event) => void createAccount(event)}>
+          <div className="admin-card-heading"><div><p className="eyebrow">New account</p><h2>Invite a viewer</h2></div><UserPlus size={22} /></div>
+          <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={40} autoComplete="off" /></label>
+          <label><span>Temporary password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} autoComplete="new-password" /></label>
+          <label><span>Access level</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="user">Viewer</option><option value="admin">Administrator</option></select></label>
+          <button className="primary" disabled={creating || username.trim().length < 3 || password.length < 10}>{creating ? <Loader2 className="spin" size={17} /> : <UserPlus size={17} />}{creating ? "Creating…" : "Create account"}</button>
+          <small>Passwords are hashed before storage. The password cannot be viewed again after creation.</small>
+        </form>
+
+        <section className="admin-users-card">
+          <div className="admin-card-heading"><div><p className="eyebrow">Directory</p><h2>{users.length} account{users.length === 1 ? "" : "s"}</h2></div><Users size={22} /></div>
+          {message && <p className="admin-message"><AlertTriangle size={16} />{message}</p>}
+          {loading ? <div className="admin-loading"><Loader2 className="spin" /> Loading accounts…</div> : (
+            <div className="admin-user-list">
+              {users.map((user) => <AdminUserRow key={user.id} user={user} isCurrent={user.id === currentUser.id} onSaved={loadUsers} onError={setMessage} />)}
+            </div>
+          )}
+        </section>
+      </div>
+    </motion.section>
+  );
+}
+
+function AdminUserRow({
+  user,
+  isCurrent,
+  onSaved,
+  onError,
+}: {
+  user: ManagedUser;
+  isCurrent: boolean;
+  onSaved: () => Promise<void>;
+  onError: (message: string | null) => void;
+}) {
+  const [enabled, setEnabled] = useState(user.enabled);
+  const [username, setUsername] = useState(user.username);
+  const [role, setRole] = useState(user.role);
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const dirty = username.trim() !== user.username || enabled !== user.enabled || role !== user.role || password.length > 0;
+
+  return (
+    <article className={`admin-user-row${enabled ? "" : " disabled"}${user.protected ? " protected" : ""}`}>
+      <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
+      <label className="admin-user-name">
+        <span className="sr-only">Username</span>
+        <input className="admin-username" value={username} disabled={user.protected} minLength={3} maxLength={40} autoComplete="off" onChange={(event) => setUsername(event.target.value)} aria-label={`Username for ${user.username}`} />
+        <small>{user.protected ? "Protected root account" : isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small>
+      </label>
+      <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value as "admin" | "user")} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
+      <label className="admin-enabled"><input type="checkbox" checked={enabled} disabled={user.protected || isCurrent} onChange={(event) => setEnabled(event.target.checked)} /><span>{enabled ? "Active" : "Disabled"}</span></label>
+      <input className="admin-reset-password" type="password" value={password} disabled={user.protected} onChange={(event) => setPassword(event.target.value)} placeholder={user.protected ? "Root is immutable" : "New password (optional)"} minLength={10} autoComplete="new-password" aria-label={`New password for ${user.username}`} />
+      <button
+        disabled={user.protected || !dirty || saving || username.trim().length < 3 || (password.length > 0 && password.length < 10)}
+        onClick={() => {
+          setSaving(true);
+          onError(null);
+          void api.updateUser(user.id, { username: username.trim(), enabled, role, password: password || undefined })
+            .then(() => { setPassword(""); return onSaved(); })
+            .catch((err) => onError(toAppError(err, "admin-users").message))
+            .finally(() => setSaving(false));
+        }}
+      >
+        {saving ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save
+      </button>
+    </article>
+  );
+}
+
 function ShelfPageShell({
   title,
   count,
@@ -1868,7 +2380,7 @@ function HistoryCard({
           <div className="progress watch-progress"><i style={{ width: `${progress}%` }} /></div>
         </div>
         <span>{item.title}</span>
-        <small>Episode {item.episodeNumber}{item.episodeTitle ? ` / ${item.episodeTitle}` : ""}</small>
+        <small>{episodeLabel(item.episodeNumber, item.episodeTitle, " / ")}</small>
       </button>
       {onToggleFavorite && (
         <button
@@ -2132,6 +2644,7 @@ function DetailPage({
                         onClick={() => onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
+                            if (event.target !== event.currentTarget) return;
                             event.preventDefault();
                             onPlay(episode, isResume ? resumeHistory?.positionSeconds ?? 0 : 0);
                           }
@@ -2144,7 +2657,7 @@ function DetailPage({
                         </span>
                         <span className="episode-row-copy">
                           <strong>Episode {episode.number}</strong>
-                          <small>{episode.title || `Episode ${episode.number}`}</small>
+                          <small>{episodeTitleDetail(episode.title, episode.number) || "Ready to play"}</small>
                         </span>
                         {isResume && <span className="episode-resume-pill">Resume</span>}
                         <button
@@ -2654,7 +3167,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
           <div className="player-now-playing">
             <span>{context.anime.provider}</span>
             <strong>{context.anime.title}</strong>
-            <small>Episode {context.episode.number}{context.episode.title ? ` · ${context.episode.title}` : ""}</small>
+            <small>{episodeLabel(context.episode.number, context.episode.title)}</small>
           </div>
           <div className="player-utility-pill">
             <button onClick={() => void toggleFullscreen()} aria-label="Toggle fullscreen" title="Toggle fullscreen">
@@ -2907,6 +3420,16 @@ function formatBytes(bytes: number) {
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** index;
   return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+function formatDownloadDate(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "Saved locally";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: new Date(timestamp).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  }).format(timestamp);
 }
 
 function isTauriRuntime() {

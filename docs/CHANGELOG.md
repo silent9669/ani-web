@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-07-14
+### Added
+- Added a persistent Apple-style desktop download library with play, reveal, missing-file detection, storage totals, and guarded deletion.
+- Added a responsive hosted web edition with secure accounts, admin user management, per-user My List and watch history, authenticated playback proxying, and browser downloads.
+- Added Railway container deployment with persistent data storage and production health checks.
+
+### Changed
+- Extended the red-and-black Apple design across the dashboard, search, account, admin, download, episode, and player surfaces, including mobile layouts.
+- Kept player metadata compact at the lower-left and removed repeated generic episode labels so titles do not cover subtitles.
+- Split CI into focused quality, responsive browser, cross-platform desktop, production container, and dependency-audit jobs for faster diagnosis.
+
 ## [1.0.8] - 2026-07-13
 ### Added
 - Added episode downloads from search previews and the episode chooser, with visible progress and completed-file feedback.

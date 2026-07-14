@@ -26,6 +26,10 @@ Thumbs.db
 
 # Config (don't commit personal configs)
 config.toml
+data/
+.env
+.env.*
+!.env.example
 
 # Development/Agent files
 __pycache__/

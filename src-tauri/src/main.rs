@@ -8,7 +8,7 @@ use ani_desk_core::catalog::{
     DiscoveryCatalog, TastePreference,
 };
 use ani_desk_core::config::Config;
-use ani_desk_core::db::{Database, WatchHistory};
+use ani_desk_core::db::{Database, DownloadRecord, WatchHistory};
 use ani_desk_core::metadata::MetadataCache;
 use ani_desk_core::player::Player;
 use ani_desk_core::providers::{
@@ -20,6 +20,8 @@ use download::{DownloadEvent, DownloadRequest, DownloadResult};
 use proxy::ProxyState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -140,6 +142,25 @@ struct FavoriteDto {
     provider: String,
     title: String,
     cover_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadRecordDto {
+    id: String,
+    provider: String,
+    anime_id: String,
+    anime_title: String,
+    cover_url: String,
+    episode_id: String,
+    episode_number: u32,
+    episode_title: Option<String>,
+    file_path: String,
+    file_name: String,
+    bytes_downloaded: u64,
+    media_kind: String,
+    completed_at: String,
+    file_exists: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -778,9 +799,210 @@ async fn download_episode(
 ) -> Result<DownloadResult, AppErrorDto> {
     let provider = request.provider.clone();
     let stream = resolve_stream(&state, &provider, &request.episode_id).await?;
-    download::download_episode(&app, &stream, &request, &on_event)
+    let result = download::download_episode(&app, &stream, &request, &on_event)
         .await
-        .map_err(|error| app_error("DOWNLOAD_FAILED", "download", Some(&provider), error, true))
+        .map_err(|error| app_error("DOWNLOAD_FAILED", "download", Some(&provider), error, true))?;
+    let record = DownloadRecord {
+        id: result.id.clone(),
+        provider: request.provider,
+        anime_id: request.anime_id,
+        anime_title: request.anime_title,
+        cover_url: request.cover_url,
+        episode_id: request.episode_id,
+        episode_number: request.episode_number,
+        episode_title: request.episode_title,
+        file_path: result.file_path.clone(),
+        file_name: result.file_name.clone(),
+        bytes_downloaded: result.bytes_downloaded,
+        media_kind: result.media_kind.clone(),
+        completed_at: Utc::now(),
+    };
+    for attempt in 1..=3 {
+        match state.db.save_download(&record).await {
+            Ok(()) => break,
+            Err(error) if attempt < 3 => {
+                tracing::warn!(
+                    attempt,
+                    path = %record.file_path,
+                    %error,
+                    "download finished but library persistence failed; retrying"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(150 * attempt)).await;
+            }
+            Err(error) => {
+                tracing::error!(
+                    path = %record.file_path,
+                    %error,
+                    "downloaded media could not be recorded in the library"
+                );
+                return Err(app_error("DATABASE_ERROR", "downloads", None, error, true));
+            }
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn list_downloads(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<DownloadRecordDto>, AppErrorDto> {
+    let records = state
+        .db
+        .get_downloads(limit.unwrap_or(500).min(2_000))
+        .await
+        .map_err(|error| app_error("DATABASE_ERROR", "downloads", None, error, true))?;
+    let mut downloads = Vec::with_capacity(records.len());
+    for record in records {
+        let file_exists = tokio::fs::try_exists(&record.file_path)
+            .await
+            .unwrap_or(false);
+        downloads.push(map_download_record(record, file_exists));
+    }
+    Ok(downloads)
+}
+
+#[tauri::command]
+async fn open_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppErrorDto> {
+    let record = get_download_record(&state, &id).await?;
+    let path = download::validated_registered_path(&app, &record.file_path)
+        .await
+        .map_err(|error| app_error("DOWNLOAD_FILE_UNAVAILABLE", "downloads", None, error, false))?;
+    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        return Err(app_error_message(
+            "DOWNLOAD_FILE_UNAVAILABLE",
+            "downloads",
+            None,
+            "This downloaded file is no longer on this Mac or PC.",
+            false,
+        ));
+    }
+    open_path(&path, false)
+        .map_err(|error| app_error("DOWNLOAD_OPEN_FAILED", "downloads", None, error, true))
+}
+
+#[tauri::command]
+async fn reveal_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppErrorDto> {
+    let record = get_download_record(&state, &id).await?;
+    let path = download::validated_registered_path(&app, &record.file_path)
+        .await
+        .map_err(|error| app_error("DOWNLOAD_FILE_UNAVAILABLE", "downloads", None, error, false))?;
+    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        return Err(app_error_message(
+            "DOWNLOAD_FILE_UNAVAILABLE",
+            "downloads",
+            None,
+            "This downloaded file is no longer on this Mac or PC.",
+            false,
+        ));
+    }
+    open_path(&path, true)
+        .map_err(|error| app_error("DOWNLOAD_OPEN_FAILED", "downloads", None, error, true))
+}
+
+#[tauri::command]
+async fn delete_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppErrorDto> {
+    let record = get_download_record(&state, &id).await?;
+    let path = download::validated_registered_path(&app, &record.file_path)
+        .await
+        .map_err(|error| app_error("DOWNLOAD_FILE_UNAVAILABLE", "downloads", None, error, false))?;
+    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|error| app_error("DOWNLOAD_DELETE_FAILED", "downloads", None, error, true))?;
+    }
+    state
+        .db
+        .remove_download(&id)
+        .await
+        .map_err(|error| app_error("DATABASE_ERROR", "downloads", None, error, true))
+}
+
+async fn get_download_record(state: &AppState, id: &str) -> Result<DownloadRecord, AppErrorDto> {
+    state
+        .db
+        .get_download(id)
+        .await
+        .map_err(|error| app_error("DATABASE_ERROR", "downloads", None, error, true))?
+        .ok_or_else(|| {
+            app_error_message(
+                "DOWNLOAD_NOT_FOUND",
+                "downloads",
+                None,
+                "This download is no longer in your library.",
+                false,
+            )
+        })
+}
+
+fn map_download_record(record: DownloadRecord, file_exists: bool) -> DownloadRecordDto {
+    DownloadRecordDto {
+        id: record.id,
+        provider: record.provider,
+        anime_id: record.anime_id,
+        anime_title: record.anime_title,
+        cover_url: record.cover_url,
+        episode_id: record.episode_id,
+        episode_number: record.episode_number,
+        episode_title: record.episode_title,
+        file_path: record.file_path,
+        file_name: record.file_name,
+        bytes_downloaded: record.bytes_downloaded,
+        media_kind: record.media_kind,
+        completed_at: record.completed_at.to_rfc3339(),
+        file_exists,
+    }
+}
+
+fn open_path(path: &Path, reveal: bool) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        if reveal {
+            command.arg("-R");
+        }
+        command.arg(path);
+        command
+    };
+
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = Command::new("explorer.exe");
+        if reveal {
+            command.arg(format!("/select,{}", path.display()));
+        } else {
+            command.arg(path);
+        }
+        command
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(if reveal {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        });
+        command
+    };
+
+    command
+        .spawn()
+        .context("Could not open the downloaded file")?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1365,6 +1587,10 @@ fn main() {
             get_episodes,
             prepare_playback,
             download_episode,
+            list_downloads,
+            open_download,
+            reveal_download,
+            delete_download,
             open_in_mpv,
             save_progress,
             add_to_my_list,

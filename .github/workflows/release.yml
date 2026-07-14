@@ -9,7 +9,7 @@ on:
       version:
         description: "Release tag to publish"
         required: true
-        default: "v1.0.8"
+        default: "v1.0.9"
 
 permissions:
   contents: write
@@ -25,14 +25,17 @@ jobs:
   validate:
     name: Validate release metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -68,6 +71,7 @@ jobs:
     name: Build ${{ matrix.name }}
     needs: validate
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +93,9 @@ jobs:
             collect_platform: linux-x64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,7 +103,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -119,18 +125,16 @@ jobs:
             rpm \
             wget
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            src-tauri/target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-downloads-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-downloads-
+            ${{ runner.os }}-cargo-downloads-
 
       - name: Install frontend dependencies
         run: npm ci
@@ -145,7 +149,7 @@ jobs:
         run: node scripts/collect-tauri-artifacts.mjs ${{ matrix.collect_platform }}
 
       - name: Upload normalized artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: release-artifacts/*
@@ -155,11 +159,14 @@ jobs:
     name: Publish GitHub release
     needs: [validate, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
@@ -178,7 +185,7 @@ jobs:
         run: gh release delete "${{ needs.validate.outputs.tag }}" --yes || true
 
       - name: Create or update release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.2
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
           target_commitish: master
@@ -196,6 +203,7 @@ jobs:
             - Windows NSIS setup and MSI installers
             - Linux AppImage, deb, and rpm packages
             - Signed Tauri updater metadata in `latest.json`
+            - Responsive Railway-ready web client and authenticated hosted API
 
             The app icon is generated from `logo.png` and appears in Finder/Dock,
             Start Menu/taskbar, and Linux desktop launchers where supported.
@@ -207,6 +215,7 @@ jobs:
     name: Verify public release assets
     needs: [validate, publish]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check release download URLs
         env:
@@ -280,19 +289,21 @@ jobs:
     name: Publish Homebrew cask
     needs: [validate, verify-release-assets]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: ani-desk
+          persist-credentials: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: silent9669/homebrew-ani-desk
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-ani-desk
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ani-desk/release-artifacts
           merge-multiple: true
@@ -314,6 +325,8 @@ jobs:
       - name: Commit and push cask update
         id: tap_update
         working-directory: homebrew-ani-desk
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -323,7 +336,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "Update ani-desk to ${{ needs.validate.outputs.tag }}"
+          git commit -m "Update ani-desk to ${TAG} [skip ci]"
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
