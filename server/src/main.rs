@@ -5,7 +5,7 @@ use ani_desk_core::{
     config::Config,
     db::Database,
     metadata::MetadataCache,
-    providers::{Anime, Language, ProviderRegistry, StreamInfo},
+    providers::{Anime, AnimeProvider, Language, ProviderRegistry, StreamInfo},
 };
 use anyhow::{Context, Result};
 use axum::{
@@ -86,6 +86,7 @@ struct ApiErrorBody {
     correlation_id: String,
 }
 
+#[derive(Debug)]
 struct ApiError(StatusCode, ApiErrorBody);
 
 impl ApiError {
@@ -145,9 +146,15 @@ struct CreateUserInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateUserInput {
+    username: String,
     enabled: bool,
     role: String,
     password: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ProviderHealthInput {
+    provider: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -366,7 +373,10 @@ async fn main() -> Result<()> {
         .route("/admin/users", get(list_users).post(create_user))
         .route("/admin/users/:id", put(update_user))
         .route("/sources", get(list_sources))
-        .route("/providers/health", get(list_sources).post(list_sources))
+        .route(
+            "/providers/health",
+            get(list_provider_health).post(retry_provider_health),
+        )
         .route("/providers/access", get(provider_access))
         .route("/discovery", get(discovery))
         .route("/catalog/search", get(search_catalog))
@@ -537,9 +547,29 @@ async fn update_user(
             false,
         ));
     }
+    if state
+        .db
+        .is_protected_user(&id)
+        .await
+        .map_err(|error| ApiError::internal("admin-users", error))?
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "ROOT_ACCOUNT_IMMUTABLE",
+            "admin-users",
+            "The root account is protected and cannot be changed.",
+            false,
+        ));
+    }
     state
         .db
-        .update_user(&id, input.enabled, &input.role, input.password.as_deref())
+        .update_user(
+            &id,
+            &input.username,
+            input.enabled,
+            &input.role,
+            input.password.as_deref(),
+        )
         .await
         .map_err(|error| {
             ApiError::new(
@@ -575,6 +605,91 @@ async fn list_sources(
             })
             .collect(),
     ))
+}
+
+fn source_dto(
+    provider: &dyn AnimeProvider,
+    status: &str,
+    failure_code: Option<String>,
+) -> SourceDto {
+    SourceDto {
+        name: provider.name().into(),
+        language: language_label(provider.language()).into(),
+        language_group: language_group(provider.language()).into(),
+        status: status.into(),
+        failure_code,
+        capabilities: provider.capabilities(),
+        website_url: provider.website_url().map(str::to_string),
+        verification_url: provider.verification_url().map(str::to_string),
+    }
+}
+
+async fn list_provider_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Vec<SourceDto>>> {
+    require_user(&state, &headers).await?;
+    Ok(Json(check_provider_health(&state, None).await?))
+}
+
+async fn retry_provider_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ProviderHealthInput>,
+) -> ApiResult<Json<Vec<SourceDto>>> {
+    require_app_request(&headers)?;
+    require_user(&state, &headers).await?;
+    Ok(Json(
+        check_provider_health(&state, input.provider.as_deref()).await?,
+    ))
+}
+
+async fn check_provider_health(
+    state: &AppState,
+    selected: Option<&str>,
+) -> ApiResult<Vec<SourceDto>> {
+    if selected.is_some_and(|name| state.providers.get_provider(name).is_none()) {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "PROVIDER_NOT_FOUND",
+            "provider-health",
+            "The selected provider is not available.",
+            false,
+        ));
+    }
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for provider in state.providers.list_providers() {
+        if selected.is_some_and(|name| name != provider.name()) {
+            continue;
+        }
+        let provider = provider.clone();
+        tasks.spawn(async move {
+            let result = provider.health_check().await;
+            match result {
+                Ok(()) => source_dto(provider.as_ref(), "healthy", None),
+                Err(error) => source_dto(
+                    provider.as_ref(),
+                    "unavailable",
+                    Some(classify_provider_error(&error.to_string()).into()),
+                ),
+            }
+        });
+    }
+
+    let mut health = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        health.push(result.map_err(|error| ApiError::internal("provider-health", error))?);
+    }
+    health.sort_by_key(|item| {
+        state
+            .providers
+            .list_providers()
+            .iter()
+            .position(|provider| provider.name() == item.name)
+            .unwrap_or(usize::MAX)
+    });
+    Ok(health)
 }
 
 async fn provider_access(
@@ -928,13 +1043,22 @@ async fn media_dash_resource(
     if !matches!(base.scheme(), "http" | "https") {
         return Err(invalid_dash_resource());
     }
+    let upstream = resolve_dash_upstream(base, relative_path)?;
+    proxy_media_url(&state, &id, &session, upstream, &headers).await
+}
+
+fn resolve_dash_upstream(base: Url, relative_path: &str) -> ApiResult<Url> {
+    let origin = base.origin();
     let upstream = if relative_path.is_empty() {
         base
     } else {
         base.join(relative_path)
             .map_err(|_| invalid_dash_resource())?
     };
-    proxy_media_url(&state, &id, &session, upstream, &headers).await
+    if upstream.origin() != origin {
+        return Err(invalid_dash_resource());
+    }
+    Ok(upstream)
 }
 
 fn invalid_dash_resource() -> ApiError {
@@ -2014,6 +2138,18 @@ mod tests {
         let without_base =
             rewrite_dash_manifest("session", &secret, &manifest_url, "<MPD><Period /></MPD>");
         assert!(without_base.starts_with("<MPD><BaseURL>/api/media/session/dash/base/"));
+    }
+
+    #[test]
+    fn dash_resources_must_remain_on_the_signed_origin() {
+        let base = Url::parse("https://cdn.example/show/manifest.mpd").unwrap();
+        assert_eq!(
+            resolve_dash_upstream(base.clone(), "segments/1.m4s")
+                .unwrap()
+                .as_str(),
+            "https://cdn.example/show/segments/1.m4s"
+        );
+        assert!(resolve_dash_upstream(base, "https://attacker.example/1.m4s").is_err());
     }
 
     #[test]

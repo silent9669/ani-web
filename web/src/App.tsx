@@ -2215,24 +2215,29 @@ function AdminUserRow({
   onError: (message: string | null) => void;
 }) {
   const [enabled, setEnabled] = useState(user.enabled);
+  const [username, setUsername] = useState(user.username);
   const [role, setRole] = useState(user.role);
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
-  const dirty = enabled !== user.enabled || role !== user.role || password.length > 0;
+  const dirty = username.trim() !== user.username || enabled !== user.enabled || role !== user.role || password.length > 0;
 
   return (
-    <article className={enabled ? "admin-user-row" : "admin-user-row disabled"}>
+    <article className={`admin-user-row${enabled ? "" : " disabled"}${user.protected ? " protected" : ""}`}>
       <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
-      <div className="admin-user-name"><strong>{user.username}</strong><small>{isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small></div>
-      <select value={role} disabled={isCurrent} onChange={(event) => setRole(event.target.value)} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
-      <label className="admin-enabled"><input type="checkbox" checked={enabled} disabled={isCurrent} onChange={(event) => setEnabled(event.target.checked)} /><span>{enabled ? "Active" : "Disabled"}</span></label>
-      <input className="admin-reset-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New password (optional)" minLength={10} autoComplete="new-password" aria-label={`New password for ${user.username}`} />
+      <label className="admin-user-name">
+        <span className="sr-only">Username</span>
+        <input className="admin-username" value={username} disabled={user.protected} minLength={3} maxLength={40} autoComplete="off" onChange={(event) => setUsername(event.target.value)} aria-label={`Username for ${user.username}`} />
+        <small>{user.protected ? "Protected root account" : isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small>
+      </label>
+      <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value)} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
+      <label className="admin-enabled"><input type="checkbox" checked={enabled} disabled={user.protected || isCurrent} onChange={(event) => setEnabled(event.target.checked)} /><span>{enabled ? "Active" : "Disabled"}</span></label>
+      <input className="admin-reset-password" type="password" value={password} disabled={user.protected} onChange={(event) => setPassword(event.target.value)} placeholder={user.protected ? "Root is immutable" : "New password (optional)"} minLength={10} autoComplete="new-password" aria-label={`New password for ${user.username}`} />
       <button
-        disabled={!dirty || saving || (password.length > 0 && password.length < 10)}
+        disabled={user.protected || !dirty || saving || username.trim().length < 3 || (password.length > 0 && password.length < 10)}
         onClick={() => {
           setSaving(true);
           onError(null);
-          void api.updateUser(user.id, { enabled, role, password: password || undefined })
+          void api.updateUser(user.id, { username: username.trim(), enabled, role, password: password || undefined })
             .then(() => { setPassword(""); return onSaved(); })
             .catch((err) => onError(toAppError(err, "admin-users").message))
             .finally(() => setSaving(false));

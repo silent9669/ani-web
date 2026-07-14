@@ -878,6 +878,15 @@ async fn reveal_download(
     let path = download::validated_registered_path(&app, &record.file_path)
         .await
         .map_err(|error| app_error("DOWNLOAD_FILE_UNAVAILABLE", "downloads", None, error, false))?;
+    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        return Err(app_error_message(
+            "DOWNLOAD_FILE_UNAVAILABLE",
+            "downloads",
+            None,
+            "This downloaded file is no longer on this Mac or PC.",
+            false,
+        ));
+    }
     open_path(&path, true)
         .map_err(|error| app_error("DOWNLOAD_OPEN_FAILED", "downloads", None, error, true))
 }

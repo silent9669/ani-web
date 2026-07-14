@@ -318,6 +318,8 @@ jobs:
       - name: Commit and push cask update
         id: tap_update
         working-directory: homebrew-ani-desk
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -327,7 +329,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "Update ani-desk to ${{ needs.validate.outputs.tag }} [skip ci]"
+          git commit -m "Update ani-desk to ${TAG} [skip ci]"
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"
 

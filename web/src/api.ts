@@ -64,7 +64,7 @@ export const api = {
   listUsers: () => webRequest<ManagedUser[]>("/admin/users"),
   createUser: (input: { username: string; password: string; role: string }) =>
     webPost<ManagedUser>("/admin/users", input),
-  updateUser: (id: string, input: { enabled: boolean; role: string; password?: string }) =>
+  updateUser: (id: string, input: { username: string; enabled: boolean; role: string; password?: string }) =>
     webRequest<void>(`/admin/users/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) }),
 
   listSources: () => isNativeRuntime() ? invoke<Source[]>("list_sources") : webRequest<Source[]>("/sources"),

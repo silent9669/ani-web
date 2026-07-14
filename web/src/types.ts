@@ -86,6 +86,7 @@ export type ManagedUser = {
   username: string;
   role: "admin" | "user" | string;
   enabled: boolean;
+  protected: boolean;
   createdAt: string;
 };
 

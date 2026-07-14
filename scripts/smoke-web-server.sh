@@ -64,7 +64,39 @@ import sys
 
 users = json.loads(sys.argv[1])
 assert {user["username"] for user in users} == {"smoke_admin", "smoke_viewer"}
+root = next(user for user in users if user["username"] == "smoke_admin")
+viewer = next(user for user in users if user["username"] == "smoke_viewer")
+assert root["protected"] is True
+assert viewer["protected"] is False
 PY
+
+root_id="$(python3 - "$users" <<'PY'
+import json, sys
+print(next(user["id"] for user in json.loads(sys.argv[1]) if user["username"] == "smoke_admin"))
+PY
+)"
+viewer_id="$(python3 - "$users" <<'PY'
+import json, sys
+print(next(user["id"] for user in json.loads(sys.argv[1]) if user["username"] == "smoke_viewer"))
+PY
+)"
+
+root_update_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request PUT \
+  --cookie "$COOKIE_JAR" \
+  --header 'Content-Type: application/json' \
+  --header 'X-Ani-Desk-Request: 1' \
+  --data '{"username":"changed_root","password":"Changed-Root-Password","role":"user","enabled":false}' \
+  "http://127.0.0.1:$PORT/api/admin/users/$root_id")"
+[[ "$root_update_status" == "400" ]]
+
+curl --fail --silent \
+  --request PUT \
+  --cookie "$COOKIE_JAR" \
+  --header 'Content-Type: application/json' \
+  --header 'X-Ani-Desk-Request: 1' \
+  --data '{"username":"smoke_viewer_renamed","password":"Smoke-Viewer-Updated-2026","role":"user","enabled":true}' \
+  "http://127.0.0.1:$PORT/api/admin/users/$viewer_id" >/dev/null
 
 favorite_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$COOKIE_JAR" \
@@ -87,13 +119,34 @@ curl --fail --silent \
   --cookie-jar "$VIEWER_COOKIE_JAR" \
   --header 'Content-Type: application/json' \
   --header 'X-Ani-Desk-Request: 1' \
-  --data '{"username":"smoke_viewer","password":"Smoke-Viewer-Password-2026"}' \
+  --data '{"username":"smoke_viewer_renamed","password":"Smoke-Viewer-Updated-2026"}' \
   "http://127.0.0.1:$PORT/api/login" >/dev/null
 
 viewer_admin_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$VIEWER_COOKIE_JAR" \
   "http://127.0.0.1:$PORT/api/admin/users")"
 [[ "$viewer_admin_status" == "403" ]]
+
+curl --fail --silent \
+  --request PUT \
+  --cookie "$COOKIE_JAR" \
+  --header 'Content-Type: application/json' \
+  --header 'X-Ani-Desk-Request: 1' \
+  --data '{"username":"smoke_viewer_renamed","role":"admin","enabled":true}' \
+  "http://127.0.0.1:$PORT/api/admin/users/$viewer_id" >/dev/null
+
+viewer_admin_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$VIEWER_COOKIE_JAR" \
+  "http://127.0.0.1:$PORT/api/admin/users")"
+[[ "$viewer_admin_status" == "200" ]]
+
+curl --fail --silent \
+  --request PUT \
+  --cookie "$COOKIE_JAR" \
+  --header 'Content-Type: application/json' \
+  --header 'X-Ani-Desk-Request: 1' \
+  --data '{"username":"smoke_viewer_renamed","role":"user","enabled":true}' \
+  "http://127.0.0.1:$PORT/api/admin/users/$viewer_id" >/dev/null
 
 viewer_favorites="$(curl --fail --silent --cookie "$VIEWER_COOKIE_JAR" "http://127.0.0.1:$PORT/api/my-list")"
 python3 - "$viewer_favorites" <<'PY'

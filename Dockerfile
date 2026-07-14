@@ -20,11 +20,16 @@ RUN cargo build --locked --release -p ani-desk-server
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system ani-desk \
+    && useradd --system --gid ani-desk --home-dir /app --shell /usr/sbin/nologin ani-desk \
+    && mkdir -p /data \
+    && chown ani-desk:ani-desk /data
 WORKDIR /app
 COPY --from=server-build /app/target/release/ani-desk-server /usr/local/bin/ani-desk-server
 COPY --from=web-build /app/web/dist ./web/dist
 ENV ANI_DESK_DATA_DIR=/data
 ENV ANI_DESK_WEB_DIR=/app/web/dist
 EXPOSE 3000
+USER ani-desk
 CMD ["ani-desk-server"]

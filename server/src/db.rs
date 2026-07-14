@@ -6,7 +6,7 @@ use argon2::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
 use rand_core::{OsRng, RngCore};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Arc};
@@ -33,6 +33,7 @@ pub struct ManagedUser {
     pub username: String,
     pub role: String,
     pub enabled: bool,
+    pub protected: bool,
     pub created_at: String,
 }
 
@@ -141,6 +142,18 @@ impl WebDatabase {
             CREATE INDEX IF NOT EXISTS idx_user_history_updated
                 ON user_history(user_id, updated_at DESC);",
         )?;
+        let has_protected = conn
+            .prepare("PRAGMA table_info(users)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .iter()
+            .any(|column| column == "protected");
+        if !has_protected {
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN protected INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -156,12 +169,18 @@ impl WebDatabase {
             )?
         };
         if exists {
+            self.conn.lock().await.execute(
+                "UPDATE users SET role = 'admin', enabled = 1, protected = 1
+                 WHERE username = ?1 COLLATE NOCASE",
+                [username.trim()],
+            )?;
             return Ok(());
         }
         let hash = hash_password_async(password).await?;
         self.conn.lock().await.execute(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role, enabled, created_at)
-             VALUES (?1, ?2, ?3, 'admin', 1, ?4)",
+            "INSERT OR IGNORE INTO users
+             (id, username, password_hash, role, enabled, protected, created_at)
+             VALUES (?1, ?2, ?3, 'admin', 1, 1, ?4)",
             params![
                 Uuid::new_v4().to_string(),
                 username,
@@ -260,7 +279,10 @@ impl WebDatabase {
 
     pub async fn list_users(&self) -> Result<Vec<ManagedUser>> {
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare("SELECT id, username, role, enabled, created_at FROM users ORDER BY username COLLATE NOCASE")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, username, role, enabled, protected, created_at
+             FROM users ORDER BY protected DESC, username COLLATE NOCASE",
+        )?;
         let users = stmt
             .query_map([], |row| {
                 Ok(ManagedUser {
@@ -268,7 +290,8 @@ impl WebDatabase {
                     username: row.get(1)?,
                     role: row.get(2)?,
                     enabled: row.get(3)?,
-                    created_at: row.get(4)?,
+                    protected: row.get(4)?,
+                    created_at: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -301,17 +324,28 @@ impl WebDatabase {
             username: username.trim().into(),
             role: role.into(),
             enabled: true,
+            protected: false,
             created_at,
         })
+    }
+
+    pub async fn is_protected_user(&self, id: &str) -> Result<bool> {
+        Ok(self.conn.lock().await.query_row(
+            "SELECT protected FROM users WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?)
     }
 
     pub async fn update_user(
         &self,
         id: &str,
+        username: &str,
         enabled: bool,
         role: &str,
         password: Option<&str>,
     ) -> Result<()> {
+        validate_username(username)?;
         anyhow::ensure!(
             matches!(role, "admin" | "user"),
             "role must be admin or user"
@@ -323,17 +357,20 @@ impl WebDatabase {
             None
         };
         let conn = self.conn.lock().await;
-        if let Some(password_hash) = password_hash {
+        let changed = if let Some(password_hash) = password_hash {
             conn.execute(
-                "UPDATE users SET enabled = ?1, role = ?2, password_hash = ?3 WHERE id = ?4",
-                params![enabled, role, password_hash, id],
-            )?;
+                "UPDATE users SET username = ?1, enabled = ?2, role = ?3, password_hash = ?4
+                 WHERE id = ?5 AND protected = 0",
+                params![username.trim(), enabled, role, password_hash, id],
+            )?
         } else {
             conn.execute(
-                "UPDATE users SET enabled = ?1, role = ?2 WHERE id = ?3",
-                params![enabled, role, id],
-            )?;
-        }
+                "UPDATE users SET username = ?1, enabled = ?2, role = ?3
+                 WHERE id = ?4 AND protected = 0",
+                params![username.trim(), enabled, role, id],
+            )?
+        };
+        anyhow::ensure!(changed == 1, "user was not found or is protected");
         if !enabled {
             conn.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
         }
@@ -341,6 +378,7 @@ impl WebDatabase {
     }
 
     pub async fn favorites(&self, user_id: &str, limit: usize) -> Result<Vec<FavoriteRecord>> {
+        let limit = i64::try_from(limit).context("favorite limit is too large")?;
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT anime_id, catalog_id, provider, title, cover_url FROM user_favorites
@@ -387,6 +425,7 @@ impl WebDatabase {
     }
 
     pub async fn history(&self, user_id: &str, limit: usize) -> Result<Vec<HistoryRecord>> {
+        let limit = i64::try_from(limit).context("history limit is too large")?;
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT anime_id, catalog_id, provider, title, cover_url, episode_number,
@@ -401,10 +440,16 @@ impl WebDatabase {
                     provider: row.get(2)?,
                     title: row.get(3)?,
                     cover_url: row.get(4)?,
-                    episode_number: row.get(5)?,
+                    episode_number: u32::try_from(row.get::<_, i64>(5)?).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(5, Type::Integer, Box::new(error))
+                    })?,
                     episode_title: row.get(6)?,
-                    position_seconds: row.get(7)?,
-                    total_seconds: row.get(8)?,
+                    position_seconds: u64::try_from(row.get::<_, i64>(7)?).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(7, Type::Integer, Box::new(error))
+                    })?,
+                    total_seconds: u64::try_from(row.get::<_, i64>(8)?).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(8, Type::Integer, Box::new(error))
+                    })?,
                     updated_at: row.get(9)?,
                 })
             })?
@@ -413,6 +458,11 @@ impl WebDatabase {
     }
 
     pub async fn save_history(&self, user_id: &str, value: &NewHistory<'_>) -> Result<()> {
+        let episode_number = i64::from(value.episode_number);
+        let position_seconds =
+            i64::try_from(value.position_seconds).context("history position is too large")?;
+        let total_seconds =
+            i64::try_from(value.total_seconds).context("history duration is too large")?;
         self.conn.lock().await.execute(
             "INSERT OR REPLACE INTO user_history
              (user_id, anime_id, catalog_id, provider, title, cover_url, episode_number,
@@ -425,10 +475,10 @@ impl WebDatabase {
                 value.provider,
                 value.title,
                 value.cover_url,
-                value.episode_number,
+                episode_number,
                 value.episode_title,
-                value.position_seconds,
-                value.total_seconds,
+                position_seconds,
+                total_seconds,
                 Utc::now().to_rfc3339()
             ],
         )?;
@@ -499,4 +549,62 @@ fn validate_password(password: &str) -> Result<()> {
         "password must contain at least 10 characters"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn root_is_immutable_and_regular_accounts_are_manageable() {
+        let path = std::env::temp_dir().join(format!("ani-desk-web-{}.db", Uuid::new_v4()));
+        let db = WebDatabase::open(&path).await.unwrap();
+        db.bootstrap_admin("root", "Root-Password-2026")
+            .await
+            .unwrap();
+
+        let viewer = db
+            .create_user("viewer", "Viewer-Password-2026", "user")
+            .await
+            .unwrap();
+        let users = db.list_users().await.unwrap();
+        let root = users.iter().find(|user| user.username == "root").unwrap();
+        assert!(root.protected);
+        assert!(!viewer.protected);
+
+        let root_update = db
+            .update_user(
+                &root.id,
+                "changed-root",
+                false,
+                "user",
+                Some("Changed-Root-Password"),
+            )
+            .await;
+        assert!(root_update.is_err());
+
+        db.update_user(
+            &viewer.id,
+            "viewer-renamed",
+            true,
+            "admin",
+            Some("Viewer-Updated-Password"),
+        )
+        .await
+        .unwrap();
+        let authenticated = db
+            .authenticate("viewer-renamed", "Viewer-Updated-Password")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(authenticated.role, "admin");
+        assert!(db
+            .authenticate("viewer", "Viewer-Password-2026")
+            .await
+            .unwrap()
+            .is_none());
+
+        drop(db);
+        let _ = tokio::fs::remove_file(path).await;
+    }
 }
