@@ -1009,7 +1009,7 @@ function LoginScreen({
         >
           <label>
             <span>Username</span>
-            <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
+            <input autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
           </label>
           <label>
             <span>Password</span>
@@ -2184,7 +2184,7 @@ function AdminPage({ currentUser, onBack }: { currentUser: SessionUser; onBack: 
       <div className="admin-layout">
         <form className="admin-create-card" onSubmit={(event) => void createAccount(event)}>
           <div className="admin-card-heading"><div><p className="eyebrow">New account</p><h2>Invite a viewer</h2></div><UserPlus size={22} /></div>
-          <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={40} autoComplete="off" /></label>
+          <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={40} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
           <label><span>Temporary password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} autoComplete="new-password" /></label>
           <label><span>Access level</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="user">Viewer</option><option value="admin">Administrator</option></select></label>
           <button className="primary" disabled={creating || username.trim().length < 3 || password.length < 10}>{creating ? <Loader2 className="spin" size={17} /> : <UserPlus size={17} />}{creating ? "Creating…" : "Create account"}</button>
@@ -2228,7 +2228,7 @@ function AdminUserRow({
       <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
       <label className="admin-user-name">
         <span className="sr-only">Username</span>
-        <input className="admin-username" value={username} disabled={user.protected} minLength={3} maxLength={40} autoComplete="off" onChange={(event) => setUsername(event.target.value)} aria-label={`Username for ${user.username}`} />
+        <input className="admin-username" value={username} disabled={user.protected} minLength={3} maxLength={40} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(event) => setUsername(event.target.value)} aria-label={`Username for ${user.username}`} />
         <small>{user.protected ? "Protected administrator account" : isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small>
       </label>
       <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value as "admin" | "user")} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
