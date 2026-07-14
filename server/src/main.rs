@@ -43,6 +43,9 @@ use tower_http::{
 use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "ani_desk_session";
+const LOGIN_ATTEMPT_WINDOW: Duration = Duration::from_secs(15 * 60);
+const LOGIN_ATTEMPT_LIMIT: usize = 8;
+const LOGIN_ATTEMPT_KEY_LIMIT: usize = 10_000;
 
 #[derive(Clone)]
 struct AppState {
@@ -1836,9 +1839,23 @@ fn require_app_request(headers: &HeaderMap) -> ApiResult<()> {
 async fn allow_login_attempt(state: &AppState, key: &str) -> bool {
     let now = Instant::now();
     let mut attempts = state.login_attempts.lock().await;
+    attempts.retain(|_, values| {
+        values.retain(|value| now.duration_since(*value) < LOGIN_ATTEMPT_WINDOW);
+        !values.is_empty()
+    });
+
+    if !attempts.contains_key(key) && attempts.len() >= LOGIN_ATTEMPT_KEY_LIMIT {
+        if let Some(oldest_key) = attempts
+            .iter()
+            .min_by_key(|(_, values)| values.last().copied())
+            .map(|(key, _)| key.clone())
+        {
+            attempts.remove(&oldest_key);
+        }
+    }
+
     let values = attempts.entry(key.into()).or_default();
-    values.retain(|value| now.duration_since(*value) < Duration::from_secs(15 * 60));
-    if values.len() >= 8 {
+    if values.len() >= LOGIN_ATTEMPT_LIMIT {
         return false;
     }
     values.push(now);
@@ -1847,9 +1864,8 @@ async fn allow_login_attempt(state: &AppState, key: &str) -> bool {
 
 fn client_identity(headers: &HeaderMap) -> String {
     headers
-        .get("x-forwarded-for")
+        .get("x-real-ip")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
         .unwrap_or("unknown")
         .trim()
         .chars()
@@ -1998,5 +2014,17 @@ mod tests {
         let without_base =
             rewrite_dash_manifest("session", &secret, &manifest_url, "<MPD><Period /></MPD>");
         assert!(without_base.starts_with("<MPD><BaseURL>/api/media/session/dash/base/"));
+    }
+
+    #[test]
+    fn client_identity_uses_railways_canonical_client_ip_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", HeaderValue::from_static("203.0.113.7"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.9, 192.0.2.4"),
+        );
+
+        assert_eq!(client_identity(&headers), "203.0.113.7");
     }
 }
