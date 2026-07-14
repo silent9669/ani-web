@@ -139,6 +139,9 @@ def test_t1_narrow_mobile_search_scrolls_without_overlap(mobile_mocked_page):
     mobile_mocked_page.set_viewport_size({"width": 330, "height": 715})
     mobile_mocked_page.locator(".hero-search-trigger").click()
     expect(mobile_mocked_page.locator(".search-welcome")).to_be_visible()
+    expect(mobile_mocked_page.locator(".search-suggestions")).to_be_visible()
+    expect(mobile_mocked_page.locator(".search-tip-grid")).to_be_visible()
+    mobile_mocked_page.wait_for_timeout(600)
 
     metrics = mobile_mocked_page.evaluate("""() => {
         const shell = document.querySelector('.app-shell.route-search');

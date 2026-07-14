@@ -41,27 +41,32 @@ function writeWebIcons(sourceRgba) {
 
 function resizeSquare(source, sourceSize, targetSize) {
   const output = Buffer.alloc(targetSize * targetSize * 4);
+  const scale = sourceSize / targetSize;
   for (let y = 0; y < targetSize; y += 1) {
+    const sourceTop = y * scale;
+    const sourceBottom = Math.min(sourceSize, (y + 1) * scale);
     for (let x = 0; x < targetSize; x += 1) {
-      const sourceX = ((x + 0.5) * sourceSize) / targetSize - 0.5;
-      const sourceY = ((y + 0.5) * sourceSize) / targetSize - 0.5;
-      const left = Math.max(0, Math.floor(sourceX));
-      const top = Math.max(0, Math.floor(sourceY));
-      const right = Math.min(sourceSize - 1, left + 1);
-      const bottom = Math.min(sourceSize - 1, top + 1);
-      const horizontalWeight = sourceX - Math.floor(sourceX);
-      const verticalWeight = sourceY - Math.floor(sourceY);
+      const sourceLeft = x * scale;
+      const sourceRight = Math.min(sourceSize, (x + 1) * scale);
+      const totals = [0, 0, 0, 0];
+      let totalWeight = 0;
+
+      for (let sourceY = Math.floor(sourceTop); sourceY < Math.ceil(sourceBottom); sourceY += 1) {
+        const verticalWeight = Math.min(sourceBottom, sourceY + 1) - Math.max(sourceTop, sourceY);
+        for (let sourceX = Math.floor(sourceLeft); sourceX < Math.ceil(sourceRight); sourceX += 1) {
+          const horizontalWeight = Math.min(sourceRight, sourceX + 1) - Math.max(sourceLeft, sourceX);
+          const weight = horizontalWeight * verticalWeight;
+          const sourceIndex = (sourceY * sourceSize + sourceX) * 4;
+          for (let channel = 0; channel < 4; channel += 1) {
+            totals[channel] += source[sourceIndex + channel] * weight;
+          }
+          totalWeight += weight;
+        }
+      }
+
       const outputIndex = (y * targetSize + x) * 4;
       for (let channel = 0; channel < 4; channel += 1) {
-        const topLeft = source[(top * sourceSize + left) * 4 + channel];
-        const topRight = source[(top * sourceSize + right) * 4 + channel];
-        const bottomLeft = source[(bottom * sourceSize + left) * 4 + channel];
-        const bottomRight = source[(bottom * sourceSize + right) * 4 + channel];
-        const topValue = topLeft + (topRight - topLeft) * horizontalWeight;
-        const bottomValue = bottomLeft + (bottomRight - bottomLeft) * horizontalWeight;
-        output[outputIndex + channel] = Math.round(
-          topValue + (bottomValue - topValue) * verticalWeight,
-        );
+        output[outputIndex + channel] = Math.round(totals[channel] / totalWeight);
       }
     }
   }

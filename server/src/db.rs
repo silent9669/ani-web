@@ -203,22 +203,24 @@ impl WebDatabase {
             let username_changed = !protected_username.eq_ignore_ascii_case(username);
             let password_changed = !verify_password_async(password, &protected_hash).await?;
             if !username_changed && !password_changed {
-                self.conn.lock().await.execute(
+                let changed = self.conn.lock().await.execute(
                     "UPDATE users SET role = 'admin', enabled = 1, protected = 1 WHERE id = ?1",
                     [&protected_id],
                 )?;
+                anyhow::ensure!(changed == 1, "protected administrator was not found");
                 return Ok(());
             }
 
             let password_hash = hash_password_async(password).await?;
             let mut conn = self.conn.lock().await;
             let transaction = conn.transaction()?;
-            transaction.execute(
+            let changed = transaction.execute(
                 "UPDATE users
                  SET username = ?1, password_hash = ?2, role = 'admin', enabled = 1, protected = 1
                  WHERE id = ?3",
                 params![username, password_hash, protected_id],
             )?;
+            anyhow::ensure!(changed == 1, "protected administrator was not found");
             transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [&protected_id])?;
             transaction.commit()?;
             return Ok(());
@@ -234,18 +236,20 @@ impl WebDatabase {
             let mut conn = self.conn.lock().await;
             let transaction = conn.transaction()?;
             if let Some(password_hash) = password_hash {
-                transaction.execute(
+                let changed = transaction.execute(
                     "UPDATE users
                      SET password_hash = ?1, role = 'admin', enabled = 1, protected = 1
                      WHERE id = ?2",
                     params![password_hash, target_id],
                 )?;
+                anyhow::ensure!(changed == 1, "configured administrator was not found");
                 transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [&target_id])?;
             } else {
-                transaction.execute(
+                let changed = transaction.execute(
                     "UPDATE users SET role = 'admin', enabled = 1, protected = 1 WHERE id = ?1",
                     [&target_id],
                 )?;
+                anyhow::ensure!(changed == 1, "configured administrator was not found");
             }
             transaction.commit()?;
             return Ok(());

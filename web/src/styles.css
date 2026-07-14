@@ -4330,84 +4330,6 @@ button:active:not(:disabled) {
 }
 
 @media (max-width: 620px) {
-  .home-dashboard {
-    gap: 0.55rem;
-    padding-top: max(0.65rem, env(safe-area-inset-top));
-  }
-
-  .home-command-center {
-    gap: 0.8rem;
-    border-radius: 20px;
-    padding: 0.85rem;
-  }
-
-  .home-command-hint {
-    display: block;
-  }
-
-  .home-command-shortcuts {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .home-command-shortcuts button {
-    min-width: 0;
-    justify-content: center;
-  }
-
-  .home-dashboard .content-row,
-  .home-dashboard .content-row:has(.empty-row) {
-    border-radius: 16px;
-  }
-
-  .home-dashboard .shelf-empty-card span {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    font-size: 0.78rem;
-  }
-
-  .admin-user-row {
-    gap: 0.48rem;
-  }
-
-  .search-source-row {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    gap: 0.55rem;
-    margin-top: 0.45rem;
-    padding-left: 0;
-  }
-
-  .availability-strip {
-    width: 100%;
-  }
-
-  .availability-strip .provider-chip {
-    flex: 0 0 auto;
-    min-width: 112px;
-    justify-content: center;
-  }
-
-  .availability-strip .provider-chip > span {
-    display: none;
-  }
-}
-
-@media (max-height: 760px) and (min-width: 981px) {
-  .home-dashboard {
-    grid-template-rows: auto auto;
-  }
-
-  .home-command-center {
-    min-height: 142px;
-  }
-}
-
-/* Phone dashboard: keep the brand compact and fully visible, matching the
-   centered mobile lockup while preserving the richer desktop command center. */
-@media (max-width: 620px) {
   .app-shell.route-search {
     min-height: 100dvh;
     overflow-x: hidden;
@@ -4440,8 +4362,14 @@ button:active:not(:disabled) {
     grid-template-rows: auto auto;
   }
 
+  .home-dashboard {
+    gap: 0.55rem;
+    padding-top: max(0.65rem, env(safe-area-inset-top));
+  }
+
   .home-command-center {
     gap: 0.65rem;
+    border-radius: 20px;
     padding: 0.65rem;
   }
 
@@ -4490,6 +4418,7 @@ button:active:not(:disabled) {
   }
 
   .home-command-shortcuts {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.45rem;
   }
@@ -4499,7 +4428,9 @@ button:active:not(:disabled) {
   }
 
   .home-command-shortcuts button {
+    min-width: 0;
     min-height: 2.75rem;
+    justify-content: center;
     overflow: hidden;
     padding-inline: 0.65rem;
     text-overflow: ellipsis;
@@ -4509,10 +4440,55 @@ button:active:not(:disabled) {
   .home-dashboard .content-row {
     min-height: 214px;
     grid-template-rows: 1.65rem 178px;
+    border-radius: 16px;
   }
 
   .home-dashboard .content-row:has(.empty-row) {
     min-height: 124px;
     grid-template-rows: 1.65rem 88px;
+  }
+
+  .home-dashboard .shelf-empty-card span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 0.78rem;
+  }
+
+  .admin-user-row {
+    gap: 0.48rem;
+  }
+
+  .search-source-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0.55rem;
+    margin-top: 0.45rem;
+    padding-left: 0;
+  }
+
+  .availability-strip {
+    width: 100%;
+  }
+
+  .availability-strip .provider-chip {
+    flex: 0 0 auto;
+    min-width: 112px;
+    justify-content: center;
+  }
+
+  .availability-strip .provider-chip > span {
+    display: none;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 981px) {
+  .home-dashboard {
+    grid-template-rows: auto auto;
+  }
+
+  .home-command-center {
+    min-height: 142px;
   }
 }
