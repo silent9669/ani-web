@@ -77,14 +77,14 @@ export type AppError = {
 export type SessionUser = {
   id: string;
   username: string;
-  role: "admin" | "user" | string;
+  role: "admin" | "user";
   hosted: boolean;
 };
 
 export type ManagedUser = {
   id: string;
   username: string;
-  role: "admin" | "user" | string;
+  role: "admin" | "user";
   enabled: boolean;
   protected: boolean;
   createdAt: string;

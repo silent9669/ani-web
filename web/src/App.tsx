@@ -2231,7 +2231,7 @@ function AdminUserRow({
         <input className="admin-username" value={username} disabled={user.protected} minLength={3} maxLength={40} autoComplete="off" onChange={(event) => setUsername(event.target.value)} aria-label={`Username for ${user.username}`} />
         <small>{user.protected ? "Protected root account" : isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small>
       </label>
-      <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value)} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
+      <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value as "admin" | "user")} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
       <label className="admin-enabled"><input type="checkbox" checked={enabled} disabled={user.protected || isCurrent} onChange={(event) => setEnabled(event.target.checked)} /><span>{enabled ? "Active" : "Disabled"}</span></label>
       <input className="admin-reset-password" type="password" value={password} disabled={user.protected} onChange={(event) => setPassword(event.target.value)} placeholder={user.protected ? "Root is immutable" : "New password (optional)"} minLength={10} autoComplete="new-password" aria-label={`New password for ${user.username}`} />
       <button

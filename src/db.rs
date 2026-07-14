@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use rusqlite::{params, Connection};
+use rusqlite::{params, types::Type, Connection};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -626,6 +626,9 @@ impl Database {
     }
 
     fn map_download_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DownloadRecord> {
+        let completed_at = row.get::<_, String>(12)?.parse().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(12, Type::Text, Box::new(error))
+        })?;
         Ok(DownloadRecord {
             id: row.get(0)?,
             provider: row.get(1)?,
@@ -639,10 +642,7 @@ impl Database {
             file_name: row.get(9)?,
             bytes_downloaded: row.get(10)?,
             media_kind: row.get(11)?,
-            completed_at: row
-                .get::<_, String>(12)?
-                .parse()
-                .unwrap_or_else(|_| Utc::now()),
+            completed_at,
         })
     }
 
