@@ -19,7 +19,7 @@ RUN cargo build --locked --release -p ani-desk-server
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system ani-desk \
     && useradd --system --gid ani-desk --home-dir /app --shell /usr/sbin/nologin ani-desk \
@@ -28,8 +28,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=server-build /app/target/release/ani-desk-server /usr/local/bin/ani-desk-server
 COPY --from=web-build /app/web/dist ./web/dist
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENV ANI_DESK_DATA_DIR=/data
 ENV ANI_DESK_WEB_DIR=/app/web/dist
 EXPOSE 3000
-USER ani-desk
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["ani-desk-server"]
