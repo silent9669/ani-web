@@ -1,6 +1,6 @@
 [package]
 name = "ani-desk-core"
-version = "1.0.8"
+version = "1.0.9"
 edition = "2021"
 authors = ["silent9669 <dev@silent9669.com>"]
 description = "Core provider, playback, and storage library for ani-desk"
@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/silent9669/ani-desk"
 
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "server"]
 resolver = "2"
 
 [lib]

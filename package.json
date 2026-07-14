@@ -1,12 +1,14 @@
 {
   "name": "ani-desk",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --config web/vite.config.ts --host 127.0.0.1 --port 1420",
     "build": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
     "preview": "vite preview --config web/vite.config.ts",
+    "serve:web": "cargo run -p ani-desk-server",
+    "check:web-server": "cargo check -p ani-desk-server",
     "icons": "node scripts/prepare-icon-source.mjs && tauri icon src-tauri/icons/icon-source.png",
     "check:icons": "node scripts/check-generated-icons.mjs",
     "check:release-version": "node scripts/verify-release-version.mjs",

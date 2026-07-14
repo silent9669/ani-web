@@ -9,6 +9,18 @@ def test_t1_dashboard_page_title(mocked_page):
     assert "ani-desk" in title.lower() or title != ""
     expect(mocked_page.locator(".home-command-brand span")).to_have_text("ani-desk")
 
+def test_t1_mobile_dashboard_has_no_horizontal_overflow(mobile_mocked_page):
+    expect(mobile_mocked_page.locator(".home-command-center")).to_be_visible()
+    expect(mobile_mocked_page.locator(".hero-search-trigger")).to_be_visible()
+    metrics = mobile_mocked_page.evaluate("""() => ({
+        viewport: window.innerWidth,
+        page: document.documentElement.scrollWidth,
+        commandWidth: document.querySelector('.home-command-center').getBoundingClientRect().width,
+    })""")
+    assert metrics["viewport"] == 390
+    assert metrics["page"] <= metrics["viewport"]
+    assert metrics["commandWidth"] <= metrics["viewport"]
+
 def test_t1_dashboard_provider_chips_rendered(mocked_page):
     expect(mocked_page.locator(".home-dashboard .provider-chip")).to_have_count(0)
     expect(mocked_page.locator(".content-row:has-text('Trending Now')")).to_be_visible()
@@ -251,6 +263,18 @@ def test_t1_episode_download_completes_without_opening_player(mocked_page):
     }""")
     assert stored["episodeNumber"] == 1
     assert stored["animeTitle"] == "Naruto Shippuden"
+
+    mocked_page.locator(".detail-back-button").click()
+    mocked_page.locator(".search-command-panel button[aria-label='Back']").click()
+    mocked_page.get_by_role("button", name="Downloads 1").click()
+    expect(mocked_page.locator(".downloads-page")).to_be_visible()
+    expect(mocked_page.locator(".download-library-row")).to_have_count(1)
+    expect(mocked_page.locator(".download-library-row")).to_contain_text("Naruto Shippuden")
+
+    mocked_page.locator(".download-library-actions button.danger").click()
+    expect(mocked_page.locator(".download-library-actions button.danger")).to_contain_text("Delete?")
+    mocked_page.locator(".download-library-actions button.danger").click()
+    expect(mocked_page.locator(".download-library-row")).to_have_count(0)
 
 def test_t1_episode_download_keyboard_does_not_start_playback(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
@@ -766,6 +790,8 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     expect(mocked_page.locator(".player-leading-controls")).to_be_visible()
     expect(mocked_page.locator(".player-volume-dock")).to_be_visible()
     expect(mocked_page.locator(".player-now-playing")).to_contain_text("Naruto Shippuden")
+    expect(mocked_page.locator(".player-now-playing small")).to_have_text("Episode 1")
+    expect(mocked_page.locator(".player-now-playing small")).not_to_contain_text("Episode 1 · Episode 1")
     expect(mocked_page.locator(".player-timeline")).to_be_visible()
     expect(mocked_page.locator(".player-utility-pill")).to_be_visible()
 

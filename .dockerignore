@@ -1,0 +1,15 @@
+.git
+.github
+.codex
+node_modules
+target
+web/dist
+data
+.env
+.env.*
+*.db
+*.dmg
+*.app
+tests/e2e/.pytest_cache
+.venv
+.venv-e2e

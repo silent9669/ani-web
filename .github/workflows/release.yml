@@ -9,7 +9,7 @@ on:
       version:
         description: "Release tag to publish"
         required: true
-        default: "v1.0.8"
+        default: "v1.0.9"
 
 permissions:
   contents: write
@@ -197,6 +197,7 @@ jobs:
             - Windows NSIS setup and MSI installers
             - Linux AppImage, deb, and rpm packages
             - Signed Tauri updater metadata in `latest.json`
+            - Responsive Railway-ready web client and authenticated hosted API
 
             The app icon is generated from `logo.png` and appears in Finder/Dock,
             Start Menu/taskbar, and Linux desktop launchers where supported.

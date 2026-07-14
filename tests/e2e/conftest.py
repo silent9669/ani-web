@@ -90,6 +90,7 @@ def mocked_page(page, vite_server):
                 provider_search_error: null,
                 playback_error: null,
                 download_error: null,
+                downloads: [],
                 update_available: false,
                 update_error: null,
                 update_install_error: null,
@@ -247,6 +248,16 @@ def mocked_page(page, vite_server):
                 return state.continue_watching;
             } else if (cmd === "get_my_list") {
                 return state.my_list;
+            } else if (cmd === "list_downloads") {
+                return state.downloads;
+            } else if (cmd === "open_download" || cmd === "reveal_download") {
+                state.last_opened_download = args.id;
+                saveMockState(state);
+                return null;
+            } else if (cmd === "delete_download") {
+                state.downloads = state.downloads.filter(item => item.id !== args.id);
+                saveMockState(state);
+                return null;
             } else if (cmd === "get_my_list_catalog") {
                 return state.my_list.map((item, index) => ({
                     catalogId: item.catalogId || 20 + index,
@@ -366,8 +377,26 @@ def mocked_page(page, vite_server):
                     args.onEvent.onmessage({ event: "progress", progress: 100, downloadedBytes: 2048, totalBytes: null, completedSegments: 2, totalSegments: 2, fileName: null });
                 }
                 state.last_download = args.request;
+                const record = {
+                    id: args.request.id,
+                    provider: args.request.provider,
+                    animeId: args.request.animeId,
+                    animeTitle: args.request.animeTitle,
+                    coverUrl: args.request.coverUrl,
+                    episodeId: args.request.episodeId,
+                    episodeNumber: args.request.episodeNumber,
+                    episodeTitle: args.request.episodeTitle || null,
+                    filePath: `/Users/test/Downloads/ani-desk/${args.request.animeTitle}/${fileName}`,
+                    fileName,
+                    bytesDownloaded: 2048,
+                    mediaKind: "hls-ts",
+                    completedAt: new Date().toISOString(),
+                    fileExists: true
+                };
+                state.downloads = [record, ...state.downloads.filter(item => item.id !== record.id)];
                 saveMockState(state);
                 return {
+                    id: args.request.id,
                     filePath: `/Users/test/Downloads/ani-desk/${args.request.animeTitle}/${fileName}`,
                     fileName,
                     bytesDownloaded: 2048,
@@ -435,3 +464,8 @@ def mocked_page(page, vite_server):
     page.reload()
     page.wait_for_selector(".app-container, #root")
     return page
+
+@pytest.fixture(scope="function")
+def mobile_mocked_page(mocked_page):
+    mocked_page.set_viewport_size({"width": 390, "height": 844})
+    return mocked_page

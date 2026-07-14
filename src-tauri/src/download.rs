@@ -18,9 +18,12 @@ const DOWNLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadRequest {
+    pub id: String,
     pub provider: String,
+    pub anime_id: String,
     pub episode_id: String,
     pub anime_title: String,
+    pub cover_url: String,
     pub episode_number: u32,
     pub episode_title: Option<String>,
 }
@@ -28,6 +31,7 @@ pub struct DownloadRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadResult {
+    pub id: String,
     pub file_path: String,
     pub file_name: String,
     pub bytes_downloaded: u64,
@@ -124,11 +128,45 @@ pub async fn download_episode(
     );
 
     Ok(DownloadResult {
+        id: request.id.clone(),
         file_path: destination.to_string_lossy().into_owned(),
         file_name,
         bytes_downloaded,
         media_kind: if is_hls { "hls-ts" } else { "direct" }.into(),
     })
+}
+
+pub async fn validated_registered_path(app: &AppHandle, registered_path: &str) -> Result<PathBuf> {
+    let root = app
+        .path()
+        .download_dir()
+        .context("The system Downloads folder is unavailable")?
+        .join("ani-desk");
+    let canonical_root = fs::canonicalize(&root)
+        .await
+        .with_context(|| format!("Could not inspect {}", root.display()))?;
+    let candidate = PathBuf::from(registered_path);
+    let resolved = if fs::try_exists(&candidate).await.unwrap_or(false) {
+        fs::canonicalize(&candidate)
+            .await
+            .with_context(|| format!("Could not inspect {}", candidate.display()))?
+    } else {
+        let parent = candidate
+            .parent()
+            .context("The registered download path has no parent")?;
+        let file_name = candidate
+            .file_name()
+            .context("The registered download path has no file name")?;
+        fs::canonicalize(parent)
+            .await
+            .with_context(|| format!("Could not inspect {}", parent.display()))?
+            .join(file_name)
+    };
+
+    if !resolved.starts_with(&canonical_root) {
+        bail!("The registered download is outside the ani-desk download folder");
+    }
+    Ok(resolved)
 }
 
 fn build_client(stream: &StreamInfo) -> Result<Client> {

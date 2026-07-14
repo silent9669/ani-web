@@ -39,10 +39,33 @@ pub struct UpdateInfo {
     pub show_notification: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct DownloadRecord {
+    pub id: String,
+    pub provider: String,
+    pub anime_id: String,
+    pub anime_title: String,
+    pub cover_url: String,
+    pub episode_id: String,
+    pub episode_number: u32,
+    pub episode_title: Option<String>,
+    pub file_path: String,
+    pub file_name: String,
+    pub bytes_downloaded: u64,
+    pub media_kind: String,
+    pub completed_at: DateTime<Utc>,
+}
+
 impl Database {
     pub async fn new() -> Result<Self> {
         let db_path = Self::default_db_path()?;
         Self::migrate_legacy_database(&db_path).await?;
+
+        Self::new_at(db_path).await
+    }
+
+    pub async fn new_at(db_path: impl Into<PathBuf>) -> Result<Self> {
+        let db_path = db_path.into();
 
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
@@ -132,6 +155,28 @@ impl Database {
             [],
         )?;
 
+        // Completed local downloads. Active progress remains owned by the
+        // running downloader and is reconciled with this durable library when
+        // the transfer finishes.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS downloads (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                anime_id TEXT NOT NULL,
+                anime_title TEXT NOT NULL,
+                cover_url TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
+                episode_number INTEGER NOT NULL,
+                episode_title TEXT,
+                file_path TEXT NOT NULL UNIQUE,
+                file_name TEXT NOT NULL,
+                bytes_downloaded INTEGER NOT NULL,
+                media_kind TEXT NOT NULL,
+                completed_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         // Indexes
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_watch_history_updated
@@ -142,6 +187,12 @@ impl Database {
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_image_cache_accessed
              ON image_cache(accessed_at)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_downloads_completed
+             ON downloads(completed_at DESC)",
             [],
         )?;
 
@@ -512,6 +563,87 @@ impl Database {
             [],
         )?;
         Ok(())
+    }
+
+    pub async fn save_download(&self, download: &DownloadRecord) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO downloads
+             (id, provider, anime_id, anime_title, cover_url, episode_id,
+              episode_number, episode_title, file_path, file_name,
+              bytes_downloaded, media_kind, completed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                download.id,
+                download.provider,
+                download.anime_id,
+                download.anime_title,
+                download.cover_url,
+                download.episode_id,
+                download.episode_number,
+                download.episode_title,
+                download.file_path,
+                download.file_name,
+                download.bytes_downloaded,
+                download.media_kind,
+                download.completed_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_downloads(&self, limit: usize) -> Result<Vec<DownloadRecord>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, provider, anime_id, anime_title, cover_url, episode_id,
+                    episode_number, episode_title, file_path, file_name,
+                    bytes_downloaded, media_kind, completed_at
+             FROM downloads
+             ORDER BY completed_at DESC
+             LIMIT ?1",
+        )?;
+        let downloads = stmt
+            .query_map([limit], Self::map_download_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(downloads)
+    }
+
+    pub async fn get_download(&self, id: &str) -> Result<Option<DownloadRecord>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, provider, anime_id, anime_title, cover_url, episode_id,
+                    episode_number, episode_title, file_path, file_name,
+                    bytes_downloaded, media_kind, completed_at
+             FROM downloads WHERE id = ?1",
+        )?;
+        Ok(stmt.query_row([id], Self::map_download_row).ok())
+    }
+
+    pub async fn remove_download(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute("DELETE FROM downloads WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    fn map_download_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DownloadRecord> {
+        Ok(DownloadRecord {
+            id: row.get(0)?,
+            provider: row.get(1)?,
+            anime_id: row.get(2)?,
+            anime_title: row.get(3)?,
+            cover_url: row.get(4)?,
+            episode_id: row.get(5)?,
+            episode_number: row.get(6)?,
+            episode_title: row.get(7)?,
+            file_path: row.get(8)?,
+            file_name: row.get(9)?,
+            bytes_downloaded: row.get(10)?,
+            media_kind: row.get(11)?,
+            completed_at: row
+                .get::<_, String>(12)?
+                .parse()
+                .unwrap_or_else(|_| Utc::now()),
+        })
     }
 
     fn ensure_column(
