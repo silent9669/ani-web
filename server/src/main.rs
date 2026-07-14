@@ -557,9 +557,9 @@ async fn update_user(
     {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "ROOT_ACCOUNT_IMMUTABLE",
+            "PROTECTED_ADMIN_IMMUTABLE",
             "admin-users",
-            "The root account is protected and cannot be changed.",
+            "The protected administrator account is managed by the server configuration and cannot be changed here.",
             false,
         ));
     }

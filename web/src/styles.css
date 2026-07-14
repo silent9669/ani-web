@@ -4386,7 +4386,12 @@ button:active:not(:disabled) {
 
   .availability-strip .provider-chip {
     flex: 0 0 auto;
-    min-width: 132px;
+    min-width: 112px;
+    justify-content: center;
+  }
+
+  .availability-strip .provider-chip > span {
+    display: none;
   }
 }
 
@@ -4397,5 +4402,117 @@ button:active:not(:disabled) {
 
   .home-command-center {
     min-height: 142px;
+  }
+}
+
+/* Phone dashboard: keep the brand compact and fully visible, matching the
+   centered mobile lockup while preserving the richer desktop command center. */
+@media (max-width: 620px) {
+  .app-shell.route-search {
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .route-search main,
+  .route-search main > div {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .search-stage,
+  .search-stage:has(.provider-recovery) {
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: auto auto;
+    overflow: visible;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .search-stage:has(.provider-recovery) {
+    grid-template-rows: auto auto auto;
+  }
+
+  .search-welcome {
+    min-height: auto;
+    overflow: visible;
+    grid-template-rows: auto auto;
+  }
+
+  .home-command-center {
+    gap: 0.65rem;
+    padding: 0.65rem;
+  }
+
+  .home-command-brand {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    gap: 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    padding: 0.38rem 0.85rem;
+    background: rgba(16, 16, 19, 0.72);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 10px 28px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(24px) saturate(1.35);
+  }
+
+  .home-command-brand::before,
+  .home-command-kicker,
+  .home-command-brand small,
+  .home-command-hint {
+    display: none;
+  }
+
+  .home-command-logo {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  .home-command-brand span {
+    overflow: visible;
+    color: rgba(255, 255, 255, 0.94);
+    font-size: clamp(1.35rem, 7vw, 1.65rem);
+    line-height: 1;
+    letter-spacing: -0.035em;
+    white-space: nowrap;
+  }
+
+  .home-command-actions {
+    gap: 0.55rem;
+  }
+
+  .home-command-search {
+    min-height: 3.3rem;
+    border-radius: 16px;
+  }
+
+  .home-command-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .home-command-shortcuts button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  .home-command-shortcuts button {
+    min-height: 2.75rem;
+    overflow: hidden;
+    padding-inline: 0.65rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .home-dashboard .content-row {
+    min-height: 214px;
+    grid-template-rows: 1.65rem 178px;
+  }
+
+  .home-dashboard .content-row:has(.empty-row) {
+    min-height: 124px;
+    grid-template-rows: 1.65rem 88px;
   }
 }

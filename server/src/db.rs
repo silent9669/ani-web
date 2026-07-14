@@ -160,25 +160,100 @@ impl WebDatabase {
     pub async fn bootstrap_admin(&self, username: &str, password: &str) -> Result<()> {
         validate_username(username)?;
         validate_password(password)?;
-        let exists: bool = {
+        let username = username.trim();
+        let (protected_accounts, target_account) = {
             let conn = self.conn.lock().await;
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM users WHERE username = ?1 COLLATE NOCASE)",
-                [username],
-                |row| row.get(0),
-            )?
-        };
-        if exists {
-            self.conn.lock().await.execute(
-                "UPDATE users SET role = 'admin', enabled = 1, protected = 1
-                 WHERE username = ?1 COLLATE NOCASE",
-                [username.trim()],
+            let mut protected_statement = conn.prepare(
+                "SELECT id, username, password_hash FROM users WHERE protected = 1 ORDER BY created_at",
             )?;
+            let protected_accounts = protected_statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let target_account = conn
+                .query_row(
+                    "SELECT id, password_hash FROM users WHERE username = ?1 COLLATE NOCASE",
+                    [username],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            (protected_accounts, target_account)
+        };
+
+        anyhow::ensure!(
+            protected_accounts.len() <= 1,
+            "multiple protected administrator accounts exist; resolve them before changing the configured administrator"
+        );
+
+        if let Some((protected_id, protected_username, protected_hash)) =
+            protected_accounts.into_iter().next()
+        {
+            if let Some((target_id, _)) = target_account.as_ref() {
+                anyhow::ensure!(
+                    target_id == &protected_id,
+                    "the configured administrator username is already used by another account"
+                );
+            }
+
+            let username_changed = !protected_username.eq_ignore_ascii_case(username);
+            let password_changed = !verify_password_async(password, &protected_hash).await?;
+            if !username_changed && !password_changed {
+                self.conn.lock().await.execute(
+                    "UPDATE users SET role = 'admin', enabled = 1, protected = 1 WHERE id = ?1",
+                    [&protected_id],
+                )?;
+                return Ok(());
+            }
+
+            let password_hash = hash_password_async(password).await?;
+            let mut conn = self.conn.lock().await;
+            let transaction = conn.transaction()?;
+            transaction.execute(
+                "UPDATE users
+                 SET username = ?1, password_hash = ?2, role = 'admin', enabled = 1, protected = 1
+                 WHERE id = ?3",
+                params![username, password_hash, protected_id],
+            )?;
+            transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [&protected_id])?;
+            transaction.commit()?;
             return Ok(());
         }
+
+        if let Some((target_id, target_hash)) = target_account {
+            let password_changed = !verify_password_async(password, &target_hash).await?;
+            let password_hash = if password_changed {
+                Some(hash_password_async(password).await?)
+            } else {
+                None
+            };
+            let mut conn = self.conn.lock().await;
+            let transaction = conn.transaction()?;
+            if let Some(password_hash) = password_hash {
+                transaction.execute(
+                    "UPDATE users
+                     SET password_hash = ?1, role = 'admin', enabled = 1, protected = 1
+                     WHERE id = ?2",
+                    params![password_hash, target_id],
+                )?;
+                transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [&target_id])?;
+            } else {
+                transaction.execute(
+                    "UPDATE users SET role = 'admin', enabled = 1, protected = 1 WHERE id = ?1",
+                    [&target_id],
+                )?;
+            }
+            transaction.commit()?;
+            return Ok(());
+        }
+
         let hash = hash_password_async(password).await?;
         self.conn.lock().await.execute(
-            "INSERT OR IGNORE INTO users
+            "INSERT INTO users
              (id, username, password_hash, role, enabled, protected, created_at)
              VALUES (?1, ?2, ?3, 'admin', 1, 1, ?4)",
             params![
@@ -556,7 +631,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn root_is_immutable_and_regular_accounts_are_manageable() {
+    async fn protected_admin_migrates_in_place_and_regular_accounts_are_manageable() {
         let path = std::env::temp_dir().join(format!("ani-desk-web-{}.db", Uuid::new_v4()));
         let db = WebDatabase::open(&path).await.unwrap();
         db.bootstrap_admin("root", "Root-Password-2026")
@@ -603,6 +678,40 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+
+        let root_session = db.create_session(&root.id).await.unwrap();
+        db.bootstrap_admin("ronaldo2007", "Replacement-Password-2026")
+            .await
+            .unwrap();
+        let users = db.list_users().await.unwrap();
+        assert!(!users.iter().any(|user| user.username == "root"));
+        let replacement = users
+            .iter()
+            .find(|user| user.username == "ronaldo2007")
+            .unwrap();
+        assert_eq!(replacement.id, root.id);
+        assert!(replacement.protected);
+        assert!(db
+            .authenticate("root", "Root-Password-2026")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db
+            .authenticate("ronaldo2007", "Replacement-Password-2026")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(db.session_user(&root_session).await.unwrap().is_none());
+
+        let replacement_session = db.create_session(&replacement.id).await.unwrap();
+        db.bootstrap_admin("ronaldo2007", "Replacement-Password-2026")
+            .await
+            .unwrap();
+        assert!(db
+            .session_user(&replacement_session)
+            .await
+            .unwrap()
+            .is_some());
 
         drop(db);
         let _ = tokio::fs::remove_file(path).await;
