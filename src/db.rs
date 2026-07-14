@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use rusqlite::{params, types::Type, Connection};
+use rusqlite::{params, types::Type, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -616,7 +616,7 @@ impl Database {
                     bytes_downloaded, media_kind, completed_at
              FROM downloads WHERE id = ?1",
         )?;
-        Ok(stmt.query_row([id], Self::map_download_row).ok())
+        Ok(stmt.query_row([id], Self::map_download_row).optional()?)
     }
 
     pub async fn remove_download(&self, id: &str) -> Result<()> {

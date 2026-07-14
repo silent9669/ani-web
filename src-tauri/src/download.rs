@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
@@ -142,6 +142,9 @@ pub async fn validated_registered_path(app: &AppHandle, registered_path: &str) -
         .download_dir()
         .context("The system Downloads folder is unavailable")?
         .join("ani-desk");
+    fs::create_dir_all(&root)
+        .await
+        .with_context(|| format!("Could not create {}", root.display()))?;
     let canonical_root = fs::canonicalize(&root)
         .await
         .with_context(|| format!("Could not inspect {}", root.display()))?;
@@ -151,16 +154,35 @@ pub async fn validated_registered_path(app: &AppHandle, registered_path: &str) -
             .await
             .with_context(|| format!("Could not inspect {}", candidate.display()))?
     } else {
-        let parent = candidate
+        let relative = candidate
+            .strip_prefix(&root)
+            .context("The registered download is outside the ani-desk download folder")?;
+        if relative.as_os_str().is_empty()
+            || relative
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            bail!("The registered download path is invalid");
+        }
+
+        let mut ancestor = candidate
             .parent()
             .context("The registered download path has no parent")?;
-        let file_name = candidate
-            .file_name()
-            .context("The registered download path has no file name")?;
-        fs::canonicalize(parent)
+        while !fs::try_exists(ancestor).await.unwrap_or(false) {
+            ancestor = ancestor
+                .parent()
+                .context("The registered download is outside the ani-desk download folder")?;
+            if !ancestor.starts_with(&root) {
+                bail!("The registered download is outside the ani-desk download folder");
+            }
+        }
+        let canonical_ancestor = fs::canonicalize(ancestor)
             .await
-            .with_context(|| format!("Could not inspect {}", parent.display()))?
-            .join(file_name)
+            .with_context(|| format!("Could not inspect {}", ancestor.display()))?;
+        if !canonical_ancestor.starts_with(&canonical_root) {
+            bail!("The registered download is outside the ani-desk download folder");
+        }
+        canonical_ancestor.join(candidate.strip_prefix(ancestor)?)
     };
 
     if !resolved.starts_with(&canonical_root) {

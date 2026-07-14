@@ -43,6 +43,7 @@ use tower_http::{
 use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "ani_desk_session";
+const MAX_MEDIA_SESSIONS: usize = 2_048;
 const LOGIN_ATTEMPT_WINDOW: Duration = Duration::from_secs(15 * 60);
 const LOGIN_ATTEMPT_LIMIT: usize = 8;
 const LOGIN_ATTEMPT_KEY_LIMIT: usize = 10_000;
@@ -945,11 +946,24 @@ async fn playback(
             })
         })
         .collect();
-    state.media_sessions.lock().await.insert(
+    let now = Instant::now();
+    let mut sessions = state.media_sessions.lock().await;
+    sessions.retain(|_, session| session.expires_at > now);
+    while sessions.len() >= MAX_MEDIA_SESSIONS {
+        let Some(oldest_id) = sessions
+            .iter()
+            .min_by_key(|(_, session)| session.expires_at)
+            .map(|(id, _)| id.clone())
+        else {
+            break;
+        };
+        sessions.remove(&oldest_id);
+    }
+    sessions.insert(
         id.clone(),
         MediaSession {
             user_id: user.id,
-            expires_at: Instant::now() + Duration::from_secs(6 * 60 * 60),
+            expires_at: now + Duration::from_secs(6 * 60 * 60),
             stream: stream.clone(),
             secret,
         },
@@ -1821,9 +1835,7 @@ fn browser_download_file_name(request: &BrowserDownloadInput, stream: &StreamInf
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .filter(|value| {
-            !value.eq_ignore_ascii_case(&format!("Episode {}", request.episode_number))
-        });
+        .filter(|value| !is_generic_episode_title(value, request.episode_number));
     let stem = title
         .map(|value| format!("E{:02} - {value}", request.episode_number))
         .unwrap_or_else(|| format!("Episode {:02}", request.episode_number));
@@ -1845,6 +1857,11 @@ fn browser_download_file_name(request: &BrowserDownloadInput, stream: &StreamInf
         sanitize_file_name(&request.anime_title),
         sanitize_file_name(&stem)
     )
+}
+
+fn is_generic_episode_title(title: &str, episode_number: u32) -> bool {
+    title.eq_ignore_ascii_case(&format!("Episode {episode_number}"))
+        || title.eq_ignore_ascii_case(&format!("Episode {episode_number:02}"))
 }
 
 fn sanitize_file_name(value: &str) -> String {
@@ -2116,6 +2133,17 @@ mod tests {
         assert_eq!(
             browser_download_file_name(&request, &stream("https://cdn.example/master.m3u8")),
             "One Piece - Episode 1163.ts"
+        );
+    }
+
+    #[test]
+    fn browser_download_omits_padded_generic_episode_titles() {
+        let mut request = download_request();
+        request.episode_number = 1;
+        request.episode_title = Some("Episode 01".into());
+        assert_eq!(
+            browser_download_file_name(&request, &stream("https://cdn.example/video.mp4")),
+            "One Piece - Episode 01.mp4"
         );
     }
 
