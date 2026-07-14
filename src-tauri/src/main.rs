@@ -817,11 +817,28 @@ async fn download_episode(
         media_kind: result.media_kind.clone(),
         completed_at: Utc::now(),
     };
-    state
-        .db
-        .save_download(&record)
-        .await
-        .map_err(|error| app_error("DATABASE_ERROR", "downloads", None, error, true))?;
+    for attempt in 1..=3 {
+        match state.db.save_download(&record).await {
+            Ok(()) => break,
+            Err(error) if attempt < 3 => {
+                tracing::warn!(
+                    attempt,
+                    path = %record.file_path,
+                    %error,
+                    "download finished but library persistence failed; retrying"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(150 * attempt)).await;
+            }
+            Err(error) => {
+                tracing::error!(
+                    path = %record.file_path,
+                    %error,
+                    "downloaded media could not be recorded in the library"
+                );
+                return Err(app_error("DATABASE_ERROR", "downloads", None, error, true));
+            }
+        }
+    }
     Ok(result)
 }
 

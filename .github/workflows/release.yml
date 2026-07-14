@@ -31,6 +31,8 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -92,6 +94,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -158,6 +162,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Download release artifacts
         uses: actions/download-artifact@v8
@@ -288,6 +294,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: ani-desk
+          persist-credentials: false
 
       - uses: actions/checkout@v7
         with:

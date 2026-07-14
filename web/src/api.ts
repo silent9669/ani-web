@@ -24,21 +24,34 @@ export const isNativeRuntime = () =>
 
 async function webRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? "GET";
-  const response = await fetch(`/api${path}`, {
-    ...init,
-    method,
-    credentials: "same-origin",
-    headers: {
-      ...(method !== "GET" && method !== "HEAD" ? { "Content-Type": "application/json", "X-Ani-Desk-Request": "1" } : {}),
-      ...init?.headers,
-    },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw body ?? new Error(`ani-desk web request failed with HTTP ${response.status}`);
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(init?.signal?.reason);
+  init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(new DOMException("ani-desk request timed out", "TimeoutError")),
+    90_000,
+  );
+  try {
+    const response = await fetch(`/api${path}`, {
+      ...init,
+      method,
+      signal: controller.signal,
+      credentials: "same-origin",
+      headers: {
+        ...(method !== "GET" && method !== "HEAD" ? { "Content-Type": "application/json", "X-Ani-Desk-Request": "1" } : {}),
+        ...init?.headers,
+      },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw body ?? new Error(`ani-desk web request failed with HTTP ${response.status}`);
+    }
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  } finally {
+    globalThis.clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", abortFromCaller);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
 const webPost = <T>(path: string, body?: unknown) =>

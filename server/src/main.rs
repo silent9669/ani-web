@@ -406,6 +406,7 @@ async fn main() -> Result<()> {
         .fallback_service(static_files)
         .with_state(state)
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("strict-transport-security"), HeaderValue::from_static("max-age=31536000; includeSubDomains")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("strict-origin-when-cross-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("permissions-policy"), HeaderValue::from_static("camera=(), microphone=(), geolocation=()")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), HeaderValue::from_static("default-src 'self'; img-src 'self' https: data:; media-src 'self' https: blob:; connect-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")))
@@ -1556,10 +1557,11 @@ async fn browser_download(
             false,
         ));
     }
-    proxy_download_response(ticket.stream, &ticket.request).await
+    proxy_download_response(&state.media_client, ticket.stream, &ticket.request).await
 }
 
 async fn proxy_download_response(
+    client: &Client,
     stream: StreamInfo,
     request: &BrowserDownloadInput,
 ) -> ApiResult<Response> {
@@ -1572,17 +1574,12 @@ async fn proxy_download_response(
             false,
         )
     })?;
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(6 * 60 * 60))
-        .build()
-        .map_err(|error| ApiError::internal("download", error))?;
     let upstream_headers = stream_headers(&stream)?;
     let is_hls = source.path().to_ascii_lowercase().contains(".m3u8");
     let file_name = browser_download_file_name(request, &stream);
 
     let body = if is_hls {
-        let segments = resolve_hls_segments(&client, &upstream_headers, source).await?;
+        let segments = resolve_hls_segments(client, &upstream_headers, source).await?;
         Body::from_stream(hls_body_stream(
             client.clone(),
             upstream_headers.clone(),

@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 28
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -80,6 +82,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -116,6 +120,8 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v6
         with:
@@ -139,6 +145,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Build production web image
         run: docker build --tag ani-desk-web:ci .
 
@@ -148,6 +156,8 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 22

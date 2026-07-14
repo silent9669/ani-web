@@ -192,7 +192,9 @@ function App() {
         setDiscovery(catalog);
       }).catch((err) => setError(toAppError(err, "catalog")));
     } catch (err) {
-      setError(toAppError(err, "bootstrap"));
+      const appError = toAppError(err, "bootstrap");
+      setError(appError);
+      setAuthError(appError.message);
     } finally {
       setBootstrapping(false);
     }
@@ -796,7 +798,7 @@ function App() {
   }
 
   if (!session) {
-    return <LoginScreen error={authError} onLogin={signIn} />;
+    return <LoginScreen error={authError ?? error?.message ?? null} onLogin={signIn} />;
   }
 
   return (
