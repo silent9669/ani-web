@@ -28,6 +28,6 @@ Download the `.AppImage`, `.deb`, or `.rpm` package from [GitHub Releases](https
 
 ## Web app
 
-The responsive hosted edition is available at [ani-desk.up.railway.app](https://ani-desk.up.railway.app). Sign in with an account created by the ani-desk administrator. My List and watch progress are private to each account; browser downloads are saved through the browser's normal Downloads flow.
+The responsive hosted edition is available at [ani.dangphuc.me](https://ani.dangphuc.me). Sign in with an account created by the ani-desk administrator. My List and watch progress are private to each account; browser downloads are saved through the browser's normal Downloads flow.
 
 The native app keeps its own Apple-style offline library under `Downloads/ani-desk`, with play, reveal, missing-file detection, storage totals, and guarded deletion.
