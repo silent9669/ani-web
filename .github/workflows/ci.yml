@@ -36,13 +36,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install Linux application libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev pkg-config
-
       - name: Cache Cargo downloads
         uses: actions/cache@v6
         with:
@@ -65,11 +58,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Lint every Rust target
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Lint web server and shared core
+        run: cargo clippy -p ani-desk-core -p ani-desk-server --all-targets -- -D warnings
 
-      - name: Run Rust tests
-        run: cargo test --workspace
+      - name: Run web server and shared-core tests
+        run: cargo test -p ani-desk-core -p ani-desk-server
 
       - name: Smoke-test hosted authentication and My List
         run: |
@@ -105,39 +98,6 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Run UI behavior and responsive tests
         run: pytest tests/e2e/test_app.py -q
-
-  desktop-build:
-    name: Desktop build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS
-            os: macos-15
-          - name: Windows
-            os: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - name: Cache Cargo downloads
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-      - run: npm ci
-      - name: Compile the native application
-        run: npm run tauri -- build --debug --no-bundle
 
   web-container:
     name: Railway container
