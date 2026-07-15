@@ -75,7 +75,8 @@ img {
 }
 
 .app-shell.route-continue,
-.app-shell.route-my-list {
+.app-shell.route-my-list,
+.app-shell.route-admin {
   overflow-y: auto;
 }
 
@@ -195,7 +196,8 @@ main {
 }
 
 .route-continue main,
-.route-my-list main {
+.route-my-list main,
+.route-admin main {
   height: auto;
   min-height: 100%;
 }
@@ -4059,10 +4061,9 @@ button:active:not(:disabled) {
 .admin-user-name small { margin-top: .15rem; color: var(--muted); font-size: .72rem; }
 .admin-user-row select,
 .admin-user-row input { min-height: 2.25rem; padding: .45rem .55rem; font-size: .78rem; }
-.admin-enabled { display: flex; align-items: center; gap: .4rem; color: rgba(255,255,255,.7); font-size: .78rem; }
-.admin-enabled input { width: 1rem; min-height: 1rem; accent-color: var(--red); }
 .admin-user-row > button { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.25rem; padding: .45rem .65rem; border: 1px solid rgba(255,45,67,.35); border-radius: .7rem; color: white; background: rgba(255,45,67,.16); }
 .admin-user-row > button:disabled { opacity: .35; }
+.admin-user-row > .admin-delete { justify-content: center; color: #ff8b98; background: rgba(255,45,67,.1); }
 .admin-loading { display: flex; align-items: center; justify-content: center; gap: .6rem; min-height: 14rem; color: var(--muted); }
 
 @media (max-width: 980px) {
@@ -4072,9 +4073,9 @@ button:active:not(:disabled) {
   .admin-layout { grid-template-columns: 1fr; }
   .admin-create-card { position: static; }
   .admin-user-row { grid-template-columns: 2.7rem minmax(0, 1fr) minmax(6rem, .5fr); }
-  .admin-enabled { grid-column: 2; }
+  .admin-delete { grid-column: 2; }
   .admin-reset-password { grid-column: 2 / 3; }
-  .admin-user-row > button { grid-column: 3; grid-row: 2; }
+  .admin-save { grid-column: 3; grid-row: 2; }
 }
 
 @media (max-width: 560px) {
@@ -4084,9 +4085,9 @@ button:active:not(:disabled) {
   .admin-current-user { display: none; }
   .admin-user-row { grid-template-columns: 2.5rem minmax(0, 1fr); }
   .admin-user-row select,
-  .admin-enabled,
+  .admin-delete,
   .admin-reset-password,
-  .admin-user-row > button { grid-column: 1 / -1; grid-row: auto; }
+  .admin-save { grid-column: 1 / -1; grid-row: auto; }
 }
 
 /* v1.0.2 compact catalog composition */

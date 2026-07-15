@@ -373,7 +373,7 @@ async fn main() -> Result<()> {
         .route("/logout", post(logout))
         .route("/session", get(session))
         .route("/admin/users", get(list_users).post(create_user))
-        .route("/admin/users/:id", put(update_user))
+        .route("/admin/users/:id", put(update_user).delete(delete_user))
         .route("/sources", get(list_sources))
         .route(
             "/providers/health",
@@ -584,6 +584,48 @@ async fn update_user(
                 false,
             )
         })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    require_app_request(&headers)?;
+    let admin = require_admin(&state, &headers).await?;
+    if admin.id == id {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "ADMIN_SELF_DELETE",
+            "admin-users",
+            "You cannot delete the account used for this session.",
+            false,
+        ));
+    }
+    if state
+        .db
+        .is_protected_user(&id)
+        .await
+        .map_err(|error| ApiError::internal("admin-users", error))?
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "PROTECTED_ADMIN_IMMUTABLE",
+            "admin-users",
+            "The protected administrator account is managed by the server configuration and cannot be deleted here.",
+            false,
+        ));
+    }
+    state.db.delete_user(&id).await.map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "USER_DELETE_FAILED",
+            "admin-users",
+            error.to_string(),
+            false,
+        )
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }
 

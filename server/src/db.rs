@@ -456,6 +456,16 @@ impl WebDatabase {
         Ok(())
     }
 
+    pub async fn delete_user(&self, id: &str) -> Result<()> {
+        let changed = self
+            .conn
+            .lock()
+            .await
+            .execute("DELETE FROM users WHERE id = ?1 AND protected = 0", [id])?;
+        anyhow::ensure!(changed == 1, "user was not found or is protected");
+        Ok(())
+    }
+
     pub async fn favorites(&self, user_id: &str, limit: usize) -> Result<Vec<FavoriteRecord>> {
         let limit = i64::try_from(limit).context("favorite limit is too large")?;
         let conn = self.conn.lock().await;
@@ -682,6 +692,15 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+
+        db.delete_user(&viewer.id).await.unwrap();
+        assert!(!db
+            .list_users()
+            .await
+            .unwrap()
+            .iter()
+            .any(|user| user.id == viewer.id));
+        assert!(db.delete_user(&root.id).await.is_err());
 
         let root_session = db.create_session(&root.id).await.unwrap();
         db.bootstrap_admin("ronaldo2007", "Replacement-Password-2026")

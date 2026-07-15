@@ -1,0 +1,12 @@
+[Unit]
+Description=Check GitHub for a CI-approved ani-desk deployment
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=ani-desk-deploy.service
+
+[Install]
+WantedBy=timers.target
