@@ -1190,11 +1190,11 @@ impl AnimeProvider for AllAnimeProvider {
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "AllAnime source {} failed for {}:{}: {}",
-                                priority_name,
+                                source = priority_name,
                                 anime_id,
                                 episode_number,
-                                err
+                                error = %err,
+                                "AllAnime source failed"
                             );
                         }
                     }

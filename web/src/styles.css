@@ -2510,10 +2510,6 @@ main {
     font-size: clamp(1.85rem, 9vw, 3rem);
   }
 
-  .detail-page-shell {
-    grid-template-rows: minmax(0, 1fr);
-  }
-
   .episode-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -2526,14 +2522,6 @@ main {
 
   .episode-resume-jump {
     max-width: calc(100vw - 3rem);
-  }
-
-  .episode-list-row {
-    grid-template-columns: 72px minmax(0, 1fr) max-content auto;
-  }
-
-  .episode-thumb {
-    width: 72px;
   }
 
   .episode-resume-pill {

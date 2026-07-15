@@ -259,18 +259,21 @@ def test_t1_mobile_episode_picker_is_single_column(mobile_mocked_page):
     metrics = mobile_mocked_page.evaluate("""() => {
         const picker = document.querySelector('.episode-list-panel')?.getBoundingClientRect();
         const row = document.querySelector('.episode-list-row')?.getBoundingClientRect();
+        const thumb = document.querySelector('.episode-thumb')?.getBoundingClientRect();
         return {
             viewport: window.innerWidth,
             page: document.documentElement.scrollWidth,
             pickerLeft: picker?.left ?? -1,
             pickerRight: picker?.right ?? 9999,
             rowRight: row?.right ?? 9999,
+            thumbWidth: thumb?.width ?? 9999,
         };
     }""")
     assert metrics["page"] <= metrics["viewport"]
     assert metrics["pickerLeft"] >= 0
     assert metrics["pickerRight"] <= metrics["viewport"]
     assert metrics["rowRight"] <= metrics["viewport"]
+    assert metrics["thumbWidth"] <= 56.1
 
 def test_t1_episode_search_filter(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
