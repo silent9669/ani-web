@@ -21,6 +21,7 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/* \
+    && printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf \
     && groupadd --system ani-desk \
     && useradd --system --gid ani-desk --home-dir /app --shell /usr/sbin/nologin ani-desk \
     && mkdir -p /data \

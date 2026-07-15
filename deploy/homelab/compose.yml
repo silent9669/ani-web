@@ -1,0 +1,43 @@
+services:
+  ani-desk:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ani-desk-homelab:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ANI_DESK_DATA_DIR: /data
+      ANI_DESK_WEB_DIR: /app/web/dist
+      ANI_DESK_SECURE_COOKIES: "1"
+      PORT: "3000"
+    volumes:
+      - ${ANI_DESK_DATA_PATH:-/srv/ani-desk/data}:/data
+    networks:
+      - web
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - ani-desk
+    environment:
+      ANI_DESK_DOMAIN: ${ANI_DESK_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+networks:
+  web:
+
+volumes:
+  caddy_data:
+  caddy_config:

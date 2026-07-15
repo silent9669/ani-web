@@ -11,6 +11,8 @@ target/
 
 # Frontend
 node_modules/
+deploy/homelab/.env
+deploy/homelab/.ddns.env
 dist/
 web/dist/
 src-tauri/gen/
