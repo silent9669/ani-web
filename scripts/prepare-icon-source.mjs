@@ -7,25 +7,28 @@ const iconSourcePath = 'src-tauri/icons/icon-source.png';
 const publicLogoPath = 'web/public/logo.png';
 const iconSize = 1024;
 const iconArtworkFill = 0.76;
+const faviconArtworkFill = 0.9;
 const crcTable = makeCrcTable();
 
 const source = readPng(readFileSync(inputPath));
 const icon = makeAppIcon(source);
+const favicon = makeFavicon(source);
 
 mkdirSync(dirname(iconSourcePath), { recursive: true });
 mkdirSync(dirname(publicLogoPath), { recursive: true });
 writeFileSync(iconSourcePath, writePng(iconSize, iconSize, icon));
 copyFileSync(inputPath, publicLogoPath);
-writeWebIcons(icon);
+writeWebIcons(icon, favicon);
 
 console.log(`Prepared ${iconSourcePath} from ${inputPath} (${source.width}x${source.height} -> ${iconSize}x${iconSize}, artwork fill ${Math.round(iconArtworkFill * 100)}%).`);
 console.log(`Refreshed ${publicLogoPath} from ${inputPath}.`);
 console.log('Refreshed browser favicon, Apple touch icon, and installable web icons.');
 
-function writeWebIcons(sourceRgba) {
+function writeWebIcons(appIconRgba, faviconRgba) {
   const sizes = [16, 32, 180, 192, 512];
   const pngs = new Map(
     sizes.map((size) => {
+      const sourceRgba = size <= 32 ? faviconRgba : appIconRgba;
       const rgba = resizeSquare(sourceRgba, iconSize, size);
       return [size, writePng(size, size, rgba)];
     }),
@@ -37,6 +40,45 @@ function writeWebIcons(sourceRgba) {
   writeFileSync('web/public/web-app-192.png', pngs.get(192));
   writeFileSync('web/public/web-app-512.png', pngs.get(512));
   writeFileSync('web/public/favicon.ico', writeIco([pngs.get(16), pngs.get(32)], [16, 32]));
+}
+
+function makeFavicon(sourceImage) {
+  const background = sampleBackground(sourceImage);
+  const foreground = findForegroundBounds(sourceImage, background) ?? findAlphaBounds(sourceImage);
+  if (!foreground) {
+    throw new Error(`${inputPath} does not contain visible artwork.`);
+  }
+
+  const target = Buffer.alloc(iconSize * iconSize * 4);
+  const maxArtwork = Math.floor(iconSize * faviconArtworkFill);
+  const scale = Math.min(maxArtwork / foreground.width, maxArtwork / foreground.height);
+  const drawWidth = Math.max(1, Math.round(foreground.width * scale));
+  const drawHeight = Math.max(1, Math.round(foreground.height * scale));
+  const left = Math.floor((iconSize - drawWidth) / 2);
+  const top = Math.floor((iconSize - drawHeight) / 2);
+
+  for (let y = 0; y < drawHeight; y += 1) {
+    for (let x = 0; x < drawWidth; x += 1) {
+      const srcX = foreground.left + Math.min(foreground.width - 1, Math.floor(x / scale));
+      const srcY = foreground.top + Math.min(foreground.height - 1, Math.floor(y / scale));
+      const sourceIndex = (srcY * sourceImage.width + srcX) * 4;
+      const distance =
+        Math.abs(sourceImage.rgba[sourceIndex] - background.r) +
+        Math.abs(sourceImage.rgba[sourceIndex + 1] - background.g) +
+        Math.abs(sourceImage.rgba[sourceIndex + 2] - background.b);
+      const backgroundAlpha = Math.max(0, Math.min(1, (distance - 24) / 44));
+      const alpha = Math.round(sourceImage.rgba[sourceIndex + 3] * backgroundAlpha);
+      if (alpha === 0) continue;
+
+      const targetIndex = ((top + y) * iconSize + left + x) * 4;
+      target[targetIndex] = sourceImage.rgba[sourceIndex];
+      target[targetIndex + 1] = sourceImage.rgba[sourceIndex + 1];
+      target[targetIndex + 2] = sourceImage.rgba[sourceIndex + 2];
+      target[targetIndex + 3] = alpha;
+    }
+  }
+
+  return target;
 }
 
 function resizeSquare(source, sourceSize, targetSize) {
