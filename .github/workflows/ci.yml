@@ -56,6 +56,18 @@ jobs:
       - name: Build responsive web client
         run: npm run build
 
+      - name: Validate homelab deployment assets
+        env:
+          ANI_DESK_ENV_FILE: .env.example
+        run: |
+          bash -n deploy/homelab/bootstrap-host.sh
+          bash -n deploy/homelab/namecheap-ddns.sh
+          bash -n deploy/homelab/pull-deploy.sh
+          docker compose \
+            --env-file deploy/homelab/.env.example \
+            --file deploy/homelab/compose.yml \
+            config --quiet
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

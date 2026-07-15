@@ -24,6 +24,39 @@ the new version changed or damaged persistent state.
 
 Never commit `.env`, database files, Caddy certificates, or backup archives.
 
+## CI-gated pull deployment
+
+The production VM uses a pull-based deployment agent. GitHub never receives an
+SSH key for the homelab and no management port is exposed to the internet.
+
+1. A pull request must pass every job in `.github/workflows/ci.yml` before it
+   can merge into `master`.
+2. `ani-desk-deploy.timer` asks the public GitHub Actions API for the latest
+   completed `CI` push run on `master`.
+3. The VM deploys only when that run concluded `success` and its `head_sha`
+   exactly matches the current remote `master` commit.
+4. The agent checks out that exact commit and builds while the old container is
+   still serving. It then briefly stops ani-desk for a consistent data backup,
+   recreates the services, and verifies the public health endpoint.
+5. If build, startup, or health verification fails, the agent rebuilds and
+   restores the previously deployed commit.
+
+The deploy checkout is `/srv/ani-desk/source`, the secret Compose environment
+file is `/srv/ani-desk/config/ani-desk.env`, and state is stored in
+`/srv/ani-desk/state`. Check deployment activity with:
+
+```sh
+systemctl status ani-desk-deploy.timer
+journalctl -u ani-desk-deploy.service -n 150 --no-pager
+cat /srv/ani-desk/state/deployed.sha
+```
+
+To pause automatic deployment without stopping the running application:
+
+```sh
+sudo systemctl disable --now ani-desk-deploy.timer
+```
+
 ## Catalog connectivity
 
 The runtime image prefers IPv4-mapped addresses. This is intentional for the

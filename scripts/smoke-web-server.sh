@@ -156,4 +156,32 @@ import sys
 assert json.loads(sys.argv[1]) == []
 PY
 
+root_delete_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request DELETE \
+  --cookie "$COOKIE_JAR" \
+  --header 'X-Ani-Desk-Request: 1' \
+  "http://127.0.0.1:$PORT/api/admin/users/$root_id")"
+[[ "$root_delete_status" == "400" ]]
+
+viewer_delete_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request DELETE \
+  --cookie "$COOKIE_JAR" \
+  --header 'X-Ani-Desk-Request: 1' \
+  "http://127.0.0.1:$PORT/api/admin/users/$viewer_id")"
+[[ "$viewer_delete_status" == "204" ]]
+
+deleted_session_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$VIEWER_COOKIE_JAR" \
+  "http://127.0.0.1:$PORT/api/session")"
+[[ "$deleted_session_status" == "401" ]]
+
+users="$(curl --fail --silent --cookie "$COOKIE_JAR" "http://127.0.0.1:$PORT/api/admin/users")"
+python3 - "$users" <<'PY'
+import json
+import sys
+
+users = json.loads(sys.argv[1])
+assert [user["username"] for user in users] == ["smoke_admin"]
+PY
+
 echo "Hosted web smoke test passed"
