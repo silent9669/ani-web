@@ -79,6 +79,8 @@ export const api = {
     webPost<ManagedUser>("/admin/users", input),
   updateUser: (id: string, input: { username: string; enabled: boolean; role: string; password?: string }) =>
     webRequest<void>(`/admin/users/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteUser: (id: string) =>
+    webRequest<void>(`/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   listSources: () => isNativeRuntime() ? invoke<Source[]>("list_sources") : webRequest<Source[]>("/sources"),
   listProviderHealth: () => isNativeRuntime() ? invoke<Source[]>("list_provider_health") : webRequest<Source[]>("/providers/health"),

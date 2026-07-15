@@ -2244,15 +2244,15 @@ function AdminUserRow({
   onSaved: () => Promise<void>;
   onError: (message: string | null) => void;
 }) {
-  const [enabled, setEnabled] = useState(user.enabled);
   const [username, setUsername] = useState(user.username);
   const [role, setRole] = useState(user.role);
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
-  const dirty = username.trim() !== user.username || enabled !== user.enabled || role !== user.role || password.length > 0;
+  const [deleting, setDeleting] = useState(false);
+  const dirty = username.trim() !== user.username || role !== user.role || password.length > 0;
 
   return (
-    <article className={`admin-user-row${enabled ? "" : " disabled"}${user.protected ? " protected" : ""}`}>
+    <article className={`admin-user-row${user.enabled ? "" : " disabled"}${user.protected ? " protected" : ""}`}>
       <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
       <label className="admin-user-name">
         <span className="sr-only">Username</span>
@@ -2260,14 +2260,30 @@ function AdminUserRow({
         <small>{user.protected ? "Protected administrator account" : isCurrent ? "Current session" : `Created ${formatDownloadDate(user.createdAt)}`}</small>
       </label>
       <select value={role} disabled={user.protected || isCurrent} onChange={(event) => setRole(event.target.value as "admin" | "user")} aria-label={`Role for ${user.username}`}><option value="user">Viewer</option><option value="admin">Admin</option></select>
-      <label className="admin-enabled"><input type="checkbox" checked={enabled} disabled={user.protected || isCurrent} onChange={(event) => setEnabled(event.target.checked)} /><span>{enabled ? "Active" : "Disabled"}</span></label>
+      <button
+        type="button"
+        className="admin-delete"
+        disabled={user.protected || isCurrent || deleting || saving}
+        onClick={() => {
+          setDeleting(true);
+          onError(null);
+          void api.deleteUser(user.id)
+            .then(onSaved)
+            .catch((err) => onError(toAppError(err, "admin-users").message))
+            .finally(() => setDeleting(false));
+        }}
+      >
+        {deleting ? <Loader2 className="spin" size={16} /> : user.protected || isCurrent ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
+        {deleting ? "Deleting…" : user.protected ? "Protected" : isCurrent ? "Current" : "Delete"}
+      </button>
       <input className="admin-reset-password" type="password" value={password} disabled={user.protected} onChange={(event) => setPassword(event.target.value)} placeholder={user.protected ? "Managed by server configuration" : "New password (optional)"} minLength={10} autoComplete="new-password" aria-label={`New password for ${user.username}`} />
       <button
+        className="admin-save"
         disabled={user.protected || !dirty || saving || username.trim().length < 3 || (password.length > 0 && password.length < 10)}
         onClick={() => {
           setSaving(true);
           onError(null);
-          void api.updateUser(user.id, { username: username.trim(), enabled, role, password: password || undefined })
+          void api.updateUser(user.id, { username: username.trim(), enabled: user.enabled, role, password: password || undefined })
             .then(() => { setPassword(""); return onSaved(); })
             .catch((err) => onError(toAppError(err, "admin-users").message))
             .finally(() => setSaving(false));
