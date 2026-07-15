@@ -1600,6 +1600,7 @@ function SearchStage({
   myList: Favorite[];
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(Boolean(selectedCatalog));
   const previewImage =
     selectedCatalog?.bannerUrl ||
     selectedAnime?.bannerUrl ||
@@ -1621,6 +1622,22 @@ function SearchStage({
   const recoverySource = selectedSource?.status === "unavailable" && (selectedSource.verificationUrl || selectedSource.websiteUrl)
     ? selectedSource
     : null;
+
+  function setMobileSearchStep(previewOpen: boolean) {
+    setMobilePreviewOpen(previewOpen);
+    if (!window.matchMedia("(max-width: 760px)").matches) return;
+    window.requestAnimationFrame(() => {
+      inputRef.current?.closest(".search-stage")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  useEffect(() => {
+    setMobilePreviewOpen(false);
+  }, [query]);
+
+  useEffect(() => {
+    if (selectedCatalog) setMobilePreviewOpen(true);
+  }, [selectedCatalog]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1772,7 +1789,7 @@ function SearchStage({
       )}
 
       {query.trim().length >= 2 && (
-        <div className="search-layout">
+        <div className={`search-layout${mobilePreviewOpen ? " mobile-preview-open" : ""}`}>
           <aside className="search-results-pane">
             <div className="pane-title">
               <span>{selectedSource ? `${selectedSource.name} Results` : "Choose Provider"}</span>
@@ -1784,7 +1801,10 @@ function SearchStage({
                 <motion.button
                   className={active ? "search-result active" : "search-result"}
                   key={animeKey(anime.provider, anime.id)}
-                  onClick={() => onSelectProviderResult(anime)}
+                  onClick={() => {
+                    onSelectProviderResult(anime);
+                    setMobileSearchStep(true);
+                  }}
                   initial={{ opacity: 0, x: -12 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{
@@ -1825,6 +1845,14 @@ function SearchStage({
               exit={{ opacity: 0, scale: 0.99, x: -18 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
+              <button
+                type="button"
+                className="mobile-preview-back"
+                onClick={() => setMobileSearchStep(false)}
+              >
+                <ArrowLeft size={18} />
+                Results
+              </button>
               {selectedCatalog || selectedAnime ? (
                 <>
                   <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
@@ -2589,6 +2617,31 @@ function DetailPage({
               <div className="episode-heading-actions">
                 <strong>{visibleEpisodes.length} shown</strong>
               </div>
+            </div>
+            <div className="mobile-episode-range">
+              <label>
+                <span>Episode range</span>
+                <select
+                  value={safeRangeIndex}
+                  onChange={(event) => {
+                    setRangeIndex(Number(event.target.value));
+                    setHighlightEpisodeNumber(null);
+                  }}
+                  aria-label="Episode range"
+                >
+                  {baseRanges.map((range, index) => {
+                    const first = range[0]?.number;
+                    const last = range[range.length - 1]?.number;
+                    return <option key={`${first}-${last}`} value={index}>{first}-{last} · {range.length} episodes</option>;
+                  })}
+                </select>
+              </label>
+              {resumeEpisode && (
+                <button className="mobile-episode-resume" onClick={() => focusEpisode(resumeEpisode)}>
+                  <Clock size={15} />
+                  Resume E{resumeEpisode.number}
+                </button>
+              )}
             </div>
             <div className="episode-toolbar">
               <label>

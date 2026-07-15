@@ -36,6 +36,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tower_http::{
+    compression::CompressionLayer,
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
@@ -411,6 +412,7 @@ async fn main() -> Result<()> {
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("strict-origin-when-cross-origin")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("permissions-policy"), HeaderValue::from_static("camera=(), microphone=(), geolocation=()")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), HeaderValue::from_static("default-src 'self'; img-src 'self' https: data:; media-src 'self' https: blob:; connect-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")))
+        .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());
 
     let port = env::var("PORT")

@@ -188,6 +188,28 @@ def test_t1_search_preview_exposes_download_entry(mocked_page):
     download.click()
     expect(mocked_page.locator(".detail-page")).to_be_visible()
 
+def test_t1_mobile_search_uses_results_then_preview(mobile_mocked_page):
+    mobile_mocked_page.locator(".hero-search-trigger").click()
+    mobile_mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mobile_mocked_page.wait_for_selector(".search-result")
+
+    expect(mobile_mocked_page.locator(".search-results-pane")).to_be_visible()
+    expect(mobile_mocked_page.locator(".search-preview")).to_be_hidden()
+    mobile_mocked_page.locator(".search-result").first.click()
+    expect(mobile_mocked_page.locator(".search-preview")).to_be_visible()
+    expect(mobile_mocked_page.get_by_role("button", name="Results")).to_be_visible()
+
+    metrics = mobile_mocked_page.evaluate("""() => ({
+        viewport: window.innerWidth,
+        page: document.documentElement.scrollWidth,
+        preview: document.querySelector('.search-preview')?.getBoundingClientRect().width ?? 0,
+    })""")
+    assert metrics["page"] <= metrics["viewport"]
+    assert metrics["preview"] <= metrics["viewport"]
+
+    mobile_mocked_page.get_by_role("button", name="Results").click()
+    expect(mobile_mocked_page.locator(".search-results-pane")).to_be_visible()
+
 def test_t1_search_has_internal_results_scroll_only(mocked_page):
     mocked_page.set_viewport_size({"width": 1440, "height": 900})
     mocked_page.locator(".hero-search-trigger").click()
@@ -221,6 +243,37 @@ def test_t1_episode_list_visibility(mocked_page):
     mocked_page.wait_for_selector(".episode-list-row")
     episodes = mocked_page.locator(".episode-list-row")
     expect(episodes.first).to_be_visible()
+
+def test_t1_mobile_episode_picker_is_single_column(mobile_mocked_page):
+    mobile_mocked_page.locator(".hero-search-trigger").click()
+    mobile_mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mobile_mocked_page.wait_for_selector(".search-result")
+    mobile_mocked_page.locator(".search-result").first.click()
+    mobile_mocked_page.locator(".detail-actions button.primary").click()
+    mobile_mocked_page.wait_for_selector(".episode-list-row")
+
+    expect(mobile_mocked_page.locator(".episode-range-panel")).to_be_hidden()
+    expect(mobile_mocked_page.locator(".mobile-episode-range")).to_be_visible()
+    expect(mobile_mocked_page.get_by_label("Episode range", exact=True)).to_be_visible()
+
+    metrics = mobile_mocked_page.evaluate("""() => {
+        const picker = document.querySelector('.episode-list-panel')?.getBoundingClientRect();
+        const row = document.querySelector('.episode-list-row')?.getBoundingClientRect();
+        const thumb = document.querySelector('.episode-thumb')?.getBoundingClientRect();
+        return {
+            viewport: window.innerWidth,
+            page: document.documentElement.scrollWidth,
+            pickerLeft: picker?.left ?? -1,
+            pickerRight: picker?.right ?? 9999,
+            rowRight: row?.right ?? 9999,
+            thumbWidth: thumb?.width ?? 9999,
+        };
+    }""")
+    assert metrics["page"] <= metrics["viewport"]
+    assert metrics["pickerLeft"] >= 0
+    assert metrics["pickerRight"] <= metrics["viewport"]
+    assert metrics["rowRight"] <= metrics["viewport"]
+    assert metrics["thumbWidth"] <= 56.1
 
 def test_t1_episode_search_filter(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()
