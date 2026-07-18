@@ -936,13 +936,10 @@ function App() {
               theme={theme}
               appScale={appScale}
               appFont={appFont}
-              session={session}
               onBack={goBack}
               onThemeChange={setTheme}
               onScaleChange={setAppScale}
               onFontChange={setAppFont}
-              onShowAdmin={session.hosted && session.role === "admin" ? () => navigate("admin") : undefined}
-              onSignOut={session.hosted ? () => void signOut() : undefined}
             />
           )}
 
@@ -1046,7 +1043,7 @@ function AppNavigation({
     { route: "search", label: "Search", icon: <Search size={20} /> },
     { route: "my-list", label: "My List", icon: <Star size={20} /> },
     ...(!hosted
-      ? [{ route: "downloads" as Route, label: "Downloads", icon: <HardDrive size={20} />, badge: downloadCount }]
+      ? [{ route: "downloads" as Route, label: "Downloads", icon: <Download size={20} />, badge: downloadCount }]
       : []),
     { route: "settings", label: "Settings", icon: <Settings2 size={20} /> },
   ];
@@ -1079,24 +1076,18 @@ function SettingsPage({
   theme,
   appScale,
   appFont,
-  session,
   onBack,
   onThemeChange,
   onScaleChange,
   onFontChange,
-  onShowAdmin,
-  onSignOut,
 }: {
   theme: AppTheme;
   appScale: AppScale;
   appFont: AppFont;
-  session: SessionUser;
   onBack: () => void;
   onThemeChange: (theme: AppTheme) => void;
   onScaleChange: (scale: AppScale) => void;
   onFontChange: (font: AppFont) => void;
-  onShowAdmin?: () => void;
-  onSignOut?: () => void;
 }) {
   const themes: Array<{ id: AppTheme; name: string; description: string }> = [
     { id: "obsidian", name: "Obsidian Cinema", description: "Warm black, restrained red, full artwork." },
@@ -1119,70 +1110,55 @@ function SettingsPage({
       <header className="settings-header">
         <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
         <div>
-          <p>Family theatre controls</p>
+          <p>Appearance</p>
           <h1>Settings</h1>
-          <span>Tune the theatre for this screen. Appearance choices stay on this device.</span>
-        </div>
-        <div className="settings-account">
-          <ShieldCheck size={18} />
-          <span>{session.username}</span>
-          <small>{session.role}</small>
+          <span>Choose the theme, interface size, and Vietnamese-compatible reading font for this device.</span>
         </div>
       </header>
 
-      <div className="settings-workbench">
-        <section className="appearance-studio">
-          <div className="appearance-preview" aria-label="Appearance preview">
-            <div className="appearance-preview-stage">
-              <span>ani-desk</span>
-              <strong>Stories feel at home.</strong>
-              <small>Tiếng Việt · English · 日本語</small>
-            </div>
+      <div className="settings-edit-grid">
+        <section className="settings-edit-card settings-theme-card">
+          <div className="settings-section-heading">
+            <div><h2>Theme</h2><p>The black icon and restrained red accent remain consistent.</p></div>
           </div>
-          <div className="appearance-controls">
-            <div className="settings-section-heading"><div><h2>Appearance</h2><p>The logo and red accent stay consistent.</p></div></div>
-            <div className="theme-options" role="radiogroup" aria-label="Application theme">
-              {themes.map((option) => (
-                <button key={option.id} role="radio" aria-checked={theme === option.id} aria-label={`${option.name}. ${option.description}`} title={option.description} className={theme === option.id ? "active" : ""} onClick={() => onThemeChange(option.id)}>
-                  <i className={`theme-swatch theme-swatch-${option.id}`} />
-                  <strong>{option.name}</strong>
-                  {theme === option.id ? <Check size={17} /> : null}
-                </button>
-              ))}
-            </div>
-            <div className="appearance-subsection">
-              <h3>Interface size</h3>
-              <div className="appearance-options" role="radiogroup" aria-label="Interface size">
-                {scales.map((option) => (
-                  <button key={option.id} role="radio" aria-checked={appScale === option.id} className={appScale === option.id ? "active" : ""} onClick={() => onScaleChange(option.id)}>
-                    <span><strong>{option.name}</strong><small>{option.description}</small></span>
-                    {appScale === option.id ? <Check size={17} /> : null}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="appearance-subsection">
-              <h3>Reading font</h3>
-              <div className="appearance-options" role="radiogroup" aria-label="Reading font">
-                {fonts.map((option) => (
-                  <button key={option.id} role="radio" aria-checked={appFont === option.id} className={appFont === option.id ? "active" : ""} onClick={() => onFontChange(option.id)}>
-                    <span><strong>{option.name}</strong><small>{option.description}</small></span>
-                    {appFont === option.id ? <Check size={17} /> : null}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="theme-options" role="radiogroup" aria-label="Application theme">
+            {themes.map((option) => (
+              <button key={option.id} role="radio" aria-checked={theme === option.id} aria-label={`${option.name}. ${option.description}`} title={option.description} className={theme === option.id ? "active" : ""} onClick={() => onThemeChange(option.id)}>
+                <i className={`theme-swatch theme-swatch-${option.id}`} />
+                <span><strong>{option.name}</strong><small>{option.description}</small></span>
+                {theme === option.id ? <Check size={17} /> : null}
+              </button>
+            ))}
           </div>
         </section>
-        <aside className="settings-side-panel">
-          <section className="settings-security">
-            <div className="settings-section-heading"><div><h2>Family access</h2><p>Accounts are managed by your private ani-desk server.</p></div></div>
-            <div className="settings-security-actions">
-              {onShowAdmin ? <button onClick={onShowAdmin}><Users size={17} /> Manage users</button> : null}
-              {onSignOut ? <button onClick={onSignOut}><LogOut size={17} /> Sign out</button> : null}
-            </div>
-          </section>
-        </aside>
+
+        <section className="settings-edit-card">
+          <div className="settings-section-heading">
+            <div><h2>Interface size</h2><p>Balance information density with comfortable touch targets.</p></div>
+          </div>
+          <div className="appearance-options" role="radiogroup" aria-label="Interface size">
+            {scales.map((option) => (
+              <button key={option.id} role="radio" aria-checked={appScale === option.id} className={appScale === option.id ? "active" : ""} onClick={() => onScaleChange(option.id)}>
+                <span><strong>{option.name}</strong><small>{option.description}</small></span>
+                {appScale === option.id ? <Check size={17} /> : null}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-edit-card">
+          <div className="settings-section-heading">
+            <div><h2>Reading font</h2><p>All choices support Vietnamese titles and interface text.</p></div>
+          </div>
+          <div className="appearance-options" role="radiogroup" aria-label="Reading font">
+            {fonts.map((option) => (
+              <button key={option.id} role="radio" aria-checked={appFont === option.id} className={appFont === option.id ? "active" : ""} onClick={() => onFontChange(option.id)}>
+                <span><strong>{option.name}</strong><small>{option.description}</small></span>
+                {appFont === option.id ? <Check size={17} /> : null}
+              </button>
+            ))}
+          </div>
+        </section>
       </div>
     </motion.section>
   );
@@ -1475,7 +1451,7 @@ function HomeDashboard({
     if (shouldReduceMotion || featurePaused || featureInteracting || !documentVisible || featureSlides.length < 2) return undefined;
     const interval = window.setInterval(() => {
       setFeatureIndex((current) => (current + 1) % featureSlides.length);
-    }, 8000);
+    }, 6500);
     return () => window.clearInterval(interval);
   }, [shouldReduceMotion, featurePaused, featureInteracting, documentVisible, featureSlides.length]);
 
@@ -2397,11 +2373,6 @@ function DownloadsPage({
       </header>
 
       <section className="download-overview">
-        <div className="download-overview-copy">
-          <span className="eyebrow">Ready anywhere</span>
-          <h2>Your offline cinema</h2>
-          <p>Saved episodes stay together here, with transfer progress and quick access to every local file.</p>
-        </div>
         <dl className="download-overview-stats">
           <div><dt>Available</dt><dd>{availableCount}</dd></div>
           <div><dt>Storage</dt><dd>{formatBytes(totalBytes)}</dd></div>
@@ -2909,13 +2880,15 @@ function DetailPage({
       <div className="detail-page-shell">
         <div className="detail-chooser-grid" style={{ "--detail-bg": `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` } as React.CSSProperties}>
           <aside className="episode-range-panel">
-            <IconButton label="Back" className="detail-back-button" onClick={onBack}>
-              <ArrowLeft size={21} />
-            </IconButton>
-            <div className="episode-range-heading">
-              <p className="eyebrow">{anime.provider}</p>
-              <h3>Ranges</h3>
-              <span>{episodes.length} total</span>
+            <div className="episode-range-top">
+              <IconButton label="Back" className="detail-back-button" onClick={onBack}>
+                <ArrowLeft size={21} />
+              </IconButton>
+              <div className="episode-range-heading">
+                <p className="eyebrow">{anime.provider}</p>
+                <h3>Ranges</h3>
+                <span>{episodes.length} total</span>
+              </div>
             </div>
             {resumeEpisode && (
               <button className="episode-resume-jump" onClick={() => focusEpisode(resumeEpisode)}>

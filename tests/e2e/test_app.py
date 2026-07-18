@@ -302,7 +302,8 @@ def test_t1_mobile_hosted_login_settings_theme_and_logout(mobile_hosted_page):
     mobile_hosted_page.locator(".app-navigation-items button:has-text('Settings')").click()
     expect(mobile_hosted_page.locator(".settings-page")).to_be_visible()
     expect(mobile_hosted_page.locator(".provider-setting")).to_have_count(0)
-    expect(mobile_hosted_page.locator(".appearance-studio")).to_be_visible()
+    expect(mobile_hosted_page.locator(".settings-edit-card")).to_have_count(3)
+    expect(mobile_hosted_page.get_by_text("Family access", exact=True)).to_have_count(0)
 
     mobile_hosted_page.get_by_role("radio", name="OLED Theatre. Deeper surfaces for dark rooms and phones.").click()
     expect(mobile_hosted_page.get_by_role("radio", name="OLED Theatre. Deeper surfaces for dark rooms and phones.")).to_have_attribute("aria-checked", "true")
@@ -321,7 +322,7 @@ def test_t1_mobile_hosted_login_settings_theme_and_logout(mobile_hosted_page):
     mobile_hosted_page.wait_for_timeout(250)
     bottom_metrics = mobile_hosted_page.evaluate("""() => {
         const navigation = document.querySelector('.app-navigation').getBoundingClientRect();
-        const lastPanel = document.querySelector('.settings-side-panel > section:last-child').getBoundingClientRect();
+        const lastPanel = document.querySelector('.settings-edit-card:last-child').getBoundingClientRect();
         return {
             navigationTop: navigation.top,
             lastPanelBottom: lastPanel.bottom,
@@ -329,7 +330,8 @@ def test_t1_mobile_hosted_login_settings_theme_and_logout(mobile_hosted_page):
     }""")
     assert bottom_metrics["lastPanelBottom"] <= bottom_metrics["navigationTop"]
 
-    mobile_hosted_page.get_by_role("button", name="Sign out").click()
+    mobile_hosted_page.locator(".app-navigation-items button:has-text('Home')").click()
+    mobile_hosted_page.get_by_role("button", name="Sign out family-admin").click()
     expect(mobile_hosted_page.get_by_role("heading", name="Sign in")).to_be_visible()
     unexpected_console_errors = [
         message for message in mobile_hosted_page.ani_console_errors
@@ -345,8 +347,7 @@ def test_t1_hosted_admin_creates_user_and_resets_password(hosted_page):
     hosted_page.get_by_role("button", name="Sign in").click()
 
     expect(hosted_page.locator(".home-command-center")).to_be_visible()
-    hosted_page.locator(".app-navigation-items button:has-text('Settings')").click()
-    hosted_page.get_by_role("button", name="Manage users").click()
+    hosted_page.get_by_role("button", name="Users", exact=True).click()
     expect(hosted_page.get_by_role("heading", name="People & access")).to_be_visible()
     expect(hosted_page.locator(".admin-user-row")).to_have_count(1)
 
