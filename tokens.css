@@ -1,0 +1,109 @@
+/* Hallmark · design-system: design.md · theme: custom Obsidian Cinema
+ * vibe: "cinematic private family theatre" · axes: dark / display-condensed-bold / warm
+ */
+:root {
+  --color-paper: oklch(9% 0.014 28);
+  --color-paper-2: oklch(14% 0.018 28);
+  --color-paper-3: oklch(20% 0.020 28);
+  --color-ink: oklch(96% 0.010 30);
+  --color-ink-2: oklch(77% 0.012 30);
+  --color-rule: oklch(32% 0.018 28);
+  --color-rule-2: oklch(25% 0.016 28);
+  --color-muted: oklch(62% 0.014 28);
+  --color-neutral: oklch(45% 0.014 28);
+  --color-accent: oklch(64% 0.20 25);
+  --color-accent-ink: oklch(12% 0.015 28);
+  --color-focus: oklch(70% 0.20 25);
+  --color-accent-soft: oklch(64% 0.20 25 / 0.16);
+  --color-accent-faint: oklch(64% 0.20 25 / 0.08);
+  --color-glass: oklch(14% 0.018 28 / 0.72);
+  --color-glass-strong: oklch(17% 0.020 28 / 0.88);
+  --color-glass-hairline: oklch(96% 0.010 30 / 0.14);
+  --color-glass-highlight: oklch(96% 0.010 30 / 0.07);
+  --color-veil: oklch(5% 0.012 28 / 0.82);
+  --color-veil-soft: oklch(5% 0.012 28 / 0.46);
+  --color-shadow: oklch(3% 0.010 28 / 0.72);
+  --color-success: oklch(72% 0.13 145);
+  --color-warning: oklch(78% 0.14 78);
+  --color-danger: oklch(64% 0.20 25);
+
+  --font-display: "Barlow Condensed", "Arial Narrow", ui-sans-serif, sans-serif;
+  --font-body: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body-manrope: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body-noto: "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body-system: -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
+  --font-outlier: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --display-weight: 700;
+  --display-style: normal;
+  --tracking-display: -0.025em;
+  --tracking-label: 0.06em;
+
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4.5rem;
+  --space-3xl: 7rem;
+  --space-4xl: 11rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 2.25rem;
+  --text-3xl: 3rem;
+  --text-display-s: clamp(2.5rem, 5vw, 4.5rem);
+  --text-display: clamp(3rem, 7vw, 6rem);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+
+  --rule-hair: 1px;
+  --rule-fine: 2px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --radius-input: 10px;
+  --radius-sheet: 20px;
+  --shadow-card: 0 1.5rem 4rem var(--color-shadow);
+  --glass-blur: blur(28px) saturate(1.35);
+  --z-base: 0;
+  --z-sticky: 200;
+  --z-sticky-nav: 300;
+  --z-overlay: 400;
+}
+
+:root[data-font="manrope"] { --font-body: var(--font-body-manrope); }
+:root[data-font="noto"] { --font-body: var(--font-body-noto); }
+:root[data-font="system"] { --font-body: var(--font-body-system); }
+
+:root[data-scale="compact"] { font-size: 15px; }
+:root[data-scale="comfortable"] { font-size: 16px; }
+:root[data-scale="large"] { font-size: 18px; }
+
+:root[data-theme="oled"] {
+  --color-paper: oklch(5% 0.010 28);
+  --color-paper-2: oklch(9% 0.012 28);
+  --color-paper-3: oklch(14% 0.014 28);
+  --color-glass: oklch(9% 0.012 28 / 0.78);
+  --color-glass-strong: oklch(11% 0.014 28 / 0.92);
+}
+
+@media (prefers-contrast: more) {
+  :root[data-theme="system"] {
+    --color-paper: oklch(7% 0.012 28);
+    --color-paper-2: oklch(13% 0.016 28);
+    --color-paper-3: oklch(22% 0.018 28);
+    --color-rule: oklch(48% 0.018 28);
+    --color-rule-2: oklch(38% 0.016 28);
+    --color-muted: oklch(72% 0.012 28);
+    --color-glass: oklch(12% 0.016 28 / 0.92);
+  }
+}

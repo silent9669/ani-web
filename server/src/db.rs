@@ -435,24 +435,27 @@ impl WebDatabase {
         } else {
             None
         };
-        let conn = self.conn.lock().await;
+        let password_changed = password_hash.is_some();
+        let mut conn = self.conn.lock().await;
+        let transaction = conn.transaction()?;
         let changed = if let Some(password_hash) = password_hash {
-            conn.execute(
+            transaction.execute(
                 "UPDATE users SET username = ?1, enabled = ?2, role = ?3, password_hash = ?4
                  WHERE id = ?5 AND protected = 0",
                 params![username.trim(), enabled, role, password_hash, id],
             )?
         } else {
-            conn.execute(
+            transaction.execute(
                 "UPDATE users SET username = ?1, enabled = ?2, role = ?3
                  WHERE id = ?4 AND protected = 0",
                 params![username.trim(), enabled, role, id],
             )?
         };
         anyhow::ensure!(changed == 1, "user was not found or is protected");
-        if !enabled {
-            conn.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
+        if password_changed || !enabled {
+            transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
         }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -672,6 +675,7 @@ mod tests {
             .await;
         assert!(root_update.is_err());
 
+        let viewer_session = db.create_session(&viewer.id).await.unwrap();
         db.update_user(
             &viewer.id,
             "viewer-renamed",
@@ -681,6 +685,7 @@ mod tests {
         )
         .await
         .unwrap();
+        assert!(db.session_user(&viewer_session).await.unwrap().is_none());
         let authenticated = db
             .authenticate("viewer-renamed", "Viewer-Updated-Password")
             .await

@@ -1,9 +1,10 @@
-import Hls from "hls.js";
+import type Hls from "hls.js";
 import type { MediaPlayerClass, Representation } from "dashjs";
 import {
   ArrowLeft,
   AlertTriangle,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock,
   Copy,
@@ -11,6 +12,7 @@ import {
   Film,
   FolderOpen,
   HardDrive,
+  House,
   Loader2,
   LogOut,
   Maximize2,
@@ -19,11 +21,11 @@ import {
   Play,
   Plus,
   Search,
+  Settings2,
   ShieldCheck,
   SkipBack,
   SkipForward,
   SlidersHorizontal,
-  Sparkles,
   Star,
   Trash2,
   UserPlus,
@@ -32,9 +34,9 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode, SyntheticEvent } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { animeKey, api, favoriteToAnime } from "./api";
 import { episodeLabel, episodeTitleDetail } from "./episode-label";
@@ -64,6 +66,9 @@ import {
 } from "./updater";
 
 const SOURCE_STORAGE_KEY = "ani-desk:selected-source";
+const THEME_STORAGE_KEY = "ani-desk:theme";
+const APP_SCALE_STORAGE_KEY = "ani-desk:scale";
+const APP_FONT_STORAGE_KEY = "ani-desk:font";
 const EPISODE_RANGE_SIZE = 50;
 const LOGO_SRC = "/logo.png";
 const fadeUpVariant = {
@@ -71,9 +76,22 @@ const fadeUpVariant = {
   show: { opacity: 1, y: 0 },
 };
 
-type Route = "home" | "my-list" | "continue" | "downloads" | "admin" | "search" | "detail" | "catalog";
+type Route = "home" | "my-list" | "continue" | "downloads" | "admin" | "search" | "detail" | "catalog" | "settings";
+type AppTheme = "obsidian" | "oled" | "system";
+type AppScale = "compact" | "comfortable" | "large";
+type AppFont = "manrope" | "noto" | "system";
 type QualityLevel = { index: number; label: string; id?: string };
 type ShelfSort = "recent" | "title" | "provider";
+type HomeFeatureSlide = {
+  id: string;
+  kind: "trending";
+  title: string;
+  image: string;
+  description: string;
+  context: string;
+  progress: number;
+  catalog?: CatalogAnime;
+};
 
 function App() {
   const [session, setSession] = useState<SessionUser | null | undefined>(undefined);
@@ -112,10 +130,28 @@ function App() {
   const pendingUpdateRef = useRef<Update | null>(null);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: "idle" });
   const [providerAccessPending, setProviderAccessPending] = useState<string | null>(null);
+  const [theme, setTheme] = useState<AppTheme>(loadSavedTheme);
+  const [appScale, setAppScale] = useState<AppScale>(loadSavedScale);
+  const [appFont, setAppFont] = useState<AppFont>(loadSavedFont);
 
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    saveTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.scale = appScale;
+    saveScale(appScale);
+  }, [appScale]);
+
+  useEffect(() => {
+    document.documentElement.dataset.font = appFont;
+    saveFont(appFont);
+  }, [appFont]);
 
   useEffect(() => {
     if (bootstrapping || !isTauriRuntime()) return;
@@ -802,10 +838,17 @@ function App() {
   }
 
   return (
-    <div className={`app-shell route-${route}`}>
+    <div className={`app-shell route-${route} ${session.hosted ? "edition-web" : "edition-desktop"}`}>
       <div
         className="ambient-backdrop"
         style={heroImage ? { backgroundImage: `url(${heroImage})` } : undefined}
+      />
+
+      <AppNavigation
+        route={route}
+        hosted={session.hosted}
+        downloadCount={downloads.length}
+        onNavigate={navigate}
       />
 
       <main>
@@ -820,7 +863,7 @@ function App() {
         <LayoutGroup id="ani-desk-navigation">
         <AnimatePresence mode="wait" initial={false}>
           {route === "home" && (
-            <motion.div key="home" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
+            <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <HomeDashboard
                 query={query}
                 loading={loading}
@@ -836,6 +879,7 @@ function App() {
                 onShowHistory={continueWatching.length ? () => navigate("continue") : undefined}
                 onShowMyList={() => navigate("my-list")}
                 onShowDownloads={() => navigate("downloads")}
+                onShowSettings={() => navigate("settings")}
                 downloadCount={downloads.length}
                 session={session}
                 onShowAdmin={session.hosted && session.role === "admin" ? () => navigate("admin") : undefined}
@@ -884,6 +928,22 @@ function App() {
 
           {route === "admin" && session.hosted && session.role === "admin" && (
             <AdminPage key="admin" currentUser={session} onBack={goBack} />
+          )}
+
+          {route === "settings" && (
+            <SettingsPage
+              key="settings"
+              theme={theme}
+              appScale={appScale}
+              appFont={appFont}
+              session={session}
+              onBack={goBack}
+              onThemeChange={setTheme}
+              onScaleChange={setAppScale}
+              onFontChange={setAppFont}
+              onShowAdmin={session.hosted && session.role === "admin" ? () => navigate("admin") : undefined}
+              onSignOut={session.hosted ? () => void signOut() : undefined}
+            />
           )}
 
           {route === "catalog" && (
@@ -970,6 +1030,172 @@ function App() {
   );
 }
 
+function AppNavigation({
+  route,
+  hosted,
+  downloadCount,
+  onNavigate,
+}: {
+  route: Route;
+  hosted: boolean;
+  downloadCount: number;
+  onNavigate: (route: Route) => void;
+}) {
+  const items: Array<{ route: Route; label: string; icon: ReactNode; badge?: number }> = [
+    { route: "home", label: "Home", icon: <House size={20} /> },
+    { route: "search", label: "Search", icon: <Search size={20} /> },
+    { route: "my-list", label: "My List", icon: <Star size={20} /> },
+    ...(!hosted
+      ? [{ route: "downloads" as Route, label: "Downloads", icon: <HardDrive size={20} />, badge: downloadCount }]
+      : []),
+    { route: "settings", label: "Settings", icon: <Settings2 size={20} /> },
+  ];
+
+  return (
+    <nav className="app-navigation" aria-label="Primary navigation">
+      <button className="app-navigation-brand" onClick={() => onNavigate("home")} aria-label="ani-desk home">
+        <img src={LOGO_SRC} alt="" />
+        <span>ani-desk</span>
+      </button>
+      <div className="app-navigation-items">
+        {items.map((item) => (
+          <button
+            key={item.route}
+            className={route === item.route ? "active" : ""}
+            aria-current={route === item.route ? "page" : undefined}
+            onClick={() => onNavigate(item.route)}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+            {item.badge ? <b>{item.badge}</b> : null}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function SettingsPage({
+  theme,
+  appScale,
+  appFont,
+  session,
+  onBack,
+  onThemeChange,
+  onScaleChange,
+  onFontChange,
+  onShowAdmin,
+  onSignOut,
+}: {
+  theme: AppTheme;
+  appScale: AppScale;
+  appFont: AppFont;
+  session: SessionUser;
+  onBack: () => void;
+  onThemeChange: (theme: AppTheme) => void;
+  onScaleChange: (scale: AppScale) => void;
+  onFontChange: (font: AppFont) => void;
+  onShowAdmin?: () => void;
+  onSignOut?: () => void;
+}) {
+  const themes: Array<{ id: AppTheme; name: string; description: string }> = [
+    { id: "obsidian", name: "Obsidian Cinema", description: "Warm black, restrained red, full artwork." },
+    { id: "oled", name: "OLED Theatre", description: "Deeper surfaces for dark rooms and phones." },
+    { id: "system", name: "Device Contrast", description: "Follows the device contrast preference." },
+  ];
+  const scales: Array<{ id: AppScale; name: string; description: string }> = [
+    { id: "compact", name: "Compact", description: "More titles and controls on a 16-inch display." },
+    { id: "comfortable", name: "Comfortable", description: "Balanced spacing for everyday viewing." },
+    { id: "large", name: "Large", description: "Larger text and touch targets for shared screens." },
+  ];
+  const fonts: Array<{ id: AppFont; name: string; description: string }> = [
+    { id: "manrope", name: "Manrope", description: "Modern interface face with Vietnamese support." },
+    { id: "noto", name: "Noto Sans", description: "Highly legible Vietnamese and multilingual text." },
+    { id: "system", name: "System", description: "Uses the native font on macOS, iPhone, or browser." },
+  ];
+
+  return (
+    <motion.section className="settings-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <header className="settings-header">
+        <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
+        <div>
+          <p>Family theatre controls</p>
+          <h1>Settings</h1>
+          <span>Tune the theatre for this screen. Appearance choices stay on this device.</span>
+        </div>
+        <div className="settings-account">
+          <ShieldCheck size={18} />
+          <span>{session.username}</span>
+          <small>{session.role}</small>
+        </div>
+      </header>
+
+      <div className="settings-workbench">
+        <section className="appearance-studio">
+          <div className="appearance-preview" aria-label="Appearance preview">
+            <div className="appearance-preview-stage">
+              <span>ani-desk</span>
+              <strong>Stories feel at home.</strong>
+              <small>Tiếng Việt · English · 日本語</small>
+            </div>
+          </div>
+          <div className="appearance-controls">
+            <div className="settings-section-heading"><div><h2>Appearance</h2><p>The logo and red accent stay consistent.</p></div></div>
+            <div className="theme-options" role="radiogroup" aria-label="Application theme">
+              {themes.map((option) => (
+                <button key={option.id} role="radio" aria-checked={theme === option.id} aria-label={`${option.name}. ${option.description}`} title={option.description} className={theme === option.id ? "active" : ""} onClick={() => onThemeChange(option.id)}>
+                  <i className={`theme-swatch theme-swatch-${option.id}`} />
+                  <strong>{option.name}</strong>
+                  {theme === option.id ? <Check size={17} /> : null}
+                </button>
+              ))}
+            </div>
+            <div className="appearance-subsection">
+              <h3>Interface size</h3>
+              <div className="appearance-options" role="radiogroup" aria-label="Interface size">
+                {scales.map((option) => (
+                  <button key={option.id} role="radio" aria-checked={appScale === option.id} className={appScale === option.id ? "active" : ""} onClick={() => onScaleChange(option.id)}>
+                    <span><strong>{option.name}</strong><small>{option.description}</small></span>
+                    {appScale === option.id ? <Check size={17} /> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="appearance-subsection">
+              <h3>Reading font</h3>
+              <div className="appearance-options" role="radiogroup" aria-label="Reading font">
+                {fonts.map((option) => (
+                  <button key={option.id} role="radio" aria-checked={appFont === option.id} className={appFont === option.id ? "active" : ""} onClick={() => onFontChange(option.id)}>
+                    <span><strong>{option.name}</strong><small>{option.description}</small></span>
+                    {appFont === option.id ? <Check size={17} /> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+        <aside className="settings-side-panel">
+          <section className="settings-security">
+            <div className="settings-section-heading"><div><h2>Family access</h2><p>Accounts are managed by your private ani-desk server.</p></div></div>
+            <div className="settings-security-actions">
+              {onShowAdmin ? <button onClick={onShowAdmin}><Users size={17} /> Manage users</button> : null}
+              {onSignOut ? <button onClick={onSignOut}><LogOut size={17} /> Sign out</button> : null}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </motion.section>
+  );
+}
+
+function providerStatusLabel(source: Source) {
+  if (source.status === "healthy") return "Healthy";
+  if (source.status === "degraded") return "Limited";
+  if (source.status === "unavailable" && source.verificationUrl) return "Verify";
+  if (source.status === "unavailable") return "Offline";
+  return "Checking";
+}
+
 function LoginScreen({
   error,
   onLogin,
@@ -984,20 +1210,36 @@ function LoginScreen({
   return (
     <main className="login-screen">
       <div className="login-ambient" />
+      <section className="login-showcase" aria-label="ani-desk family theatre">
+        <div className="login-showcase-brand">
+          <img src={LOGO_SRC} alt="" />
+          <span>ani-desk</span>
+        </div>
+        <div className="login-showcase-copy">
+          <p>Private family theatre</p>
+          <h1>Pick a source.<br />Keep your place.</h1>
+          <span>One watchlist for your family, with provider-specific search and episode progress on every signed-in device.</span>
+        </div>
+        <dl className="login-showcase-facts">
+          <div><dt>Catalogs</dt><dd>Provider-first</dd></div>
+          <div><dt>Access</dt><dd>Family accounts</dd></div>
+          <div><dt>Playback</dt><dd>Desktop + web</dd></div>
+        </dl>
+      </section>
       <motion.section
         className="login-card"
-        initial={{ opacity: 0, scale: 0.965, y: 18 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 280, damping: 28 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.22 }}
       >
         <div className="login-brand">
           <img src={LOGO_SRC} alt="ani-desk" />
-          <div><span>ani-desk</span><small>Your anime, beautifully organized.</small></div>
+          <div><span>ani-desk</span><small>Signed-in family access</small></div>
         </div>
         <div className="login-copy">
           <p className="eyebrow">Private watch space</p>
-          <h1>Welcome back.</h1>
-          <p>Sign in to sync My List and continue watching across your desktop and mobile browser.</p>
+          <h2>Sign in</h2>
+          <p>Use the account created by your family administrator.</p>
         </div>
         <form
           onSubmit={(event) => {
@@ -1018,7 +1260,7 @@ function LoginScreen({
           {error && <p className="login-error"><AlertTriangle size={16} /> {error}</p>}
           <button className="primary" disabled={submitting || !username.trim() || !password}>
             {submitting ? <Loader2 className="spin" size={18} /> : <ChevronRight size={18} />}
-            {submitting ? "Signing in…" : "Continue"}
+            {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
         <small className="login-footnote">Accounts are created by your ani-desk administrator.</small>
@@ -1160,6 +1402,7 @@ function HomeDashboard({
   onShowHistory,
   onShowMyList,
   onShowDownloads,
+  onShowSettings,
   downloadCount,
   session,
   onShowAdmin,
@@ -1182,6 +1425,7 @@ function HomeDashboard({
   onShowHistory?: () => void;
   onShowMyList: () => void;
   onShowDownloads: () => void;
+  onShowSettings: () => void;
   downloadCount: number;
   session: SessionUser;
   onShowAdmin?: () => void;
@@ -1190,6 +1434,59 @@ function HomeDashboard({
   onToggleFavorite: (anime: Anime) => void;
   onRemoveHistory: (item: WatchHistory) => void;
 }) {
+  const shouldReduceMotion = useReducedMotion();
+  const [featureIndex, setFeatureIndex] = useState(0);
+  const [featurePaused, setFeaturePaused] = useState(false);
+  const [featureInteracting, setFeatureInteracting] = useState(false);
+  const [documentVisible, setDocumentVisible] = useState(!document.hidden);
+  const featureSlides = useMemo<HomeFeatureSlide[]>(() => [
+    ...(discovery?.trending ?? []).slice(0, 10).map((item) => ({
+      id: `trending:${item.catalogId}`,
+      kind: "trending" as const,
+      title: item.title,
+      image: item.bannerUrl || item.coverUrl || LOGO_SRC,
+      description: plainDescription(item.description) || "Open the title, choose a provider, and see the episodes available to your family.",
+      context: "Trending on AniList",
+      progress: 0,
+      catalog: item,
+    })),
+  ], [discovery?.trending]);
+  const featured = featureSlides[featureIndex] ?? featureSlides[0] ?? {
+    id: "ani-desk",
+    kind: "trending" as const,
+    title: "ani-desk",
+    image: LOGO_SRC,
+    description: "Choose one provider catalog, find an episode, and settle in.",
+    context: "Private family theatre",
+    progress: 0,
+  };
+
+  useEffect(() => {
+    setFeatureIndex((current) => Math.min(current, Math.max(0, featureSlides.length - 1)));
+  }, [featureSlides.length]);
+
+  useEffect(() => {
+    const handleVisibility = () => setDocumentVisible(!document.hidden);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (shouldReduceMotion || featurePaused || featureInteracting || !documentVisible || featureSlides.length < 2) return undefined;
+    const interval = window.setInterval(() => {
+      setFeatureIndex((current) => (current + 1) % featureSlides.length);
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [shouldReduceMotion, featurePaused, featureInteracting, documentVisible, featureSlides.length]);
+
+  function showPreviousFeature() {
+    setFeatureIndex((current) => (current - 1 + featureSlides.length) % featureSlides.length);
+  }
+
+  function showNextFeature() {
+    setFeatureIndex((current) => (current + 1) % featureSlides.length);
+  }
+
   return (
     <section className="home-dashboard">
       <img className="home-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
@@ -1197,43 +1494,94 @@ function HomeDashboard({
         className="home-command-center"
         initial="hidden"
         animate="show"
+        onMouseEnter={() => setFeatureInteracting(true)}
+        onMouseLeave={() => setFeatureInteracting(false)}
+        onFocusCapture={() => setFeatureInteracting(true)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFeatureInteracting(false);
+        }}
         variants={{
-          hidden: { opacity: 0, scale: 0.985 },
+          hidden: { opacity: 0 },
           show: {
             opacity: 1,
-            scale: 1,
-            transition: { duration: 0.3, ease: "easeOut", staggerChildren: 0.055 },
+            transition: shouldReduceMotion
+              ? { duration: 0.15 }
+              : { duration: 0.3, ease: "easeOut", staggerChildren: 0.055 },
           },
         }}
       >
-        <motion.div className="home-command-brand" variants={fadeUpVariant}>
-          <img className="home-command-logo" src={LOGO_SRC} alt="ani-desk" />
-          <div>
-            <p className="home-command-kicker"><Sparkles size={14} /> Your red-carpet watchlist</p>
-            <span>ani-desk</span>
-            <small>Discover. Choose a source. Watch.</small>
-          </div>
-        </motion.div>
-        <motion.div className="home-command-actions" variants={fadeUpVariant}>
-          <motion.button
-            layoutId="app-search-shell"
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={featured.id}
+            className="home-feature-art"
+            style={{ backgroundImage: `url(${featured.image})` }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0.15 : 0.42, ease: [0.16, 1, 0.3, 1] }}
+            aria-hidden="true"
+          />
+        </AnimatePresence>
+        <div className="home-feature-veil" aria-hidden="true" />
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={`copy:${featured.id}`}
+            className="home-feature-copy"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0.15 : 0.28 }}
+          >
+            <p className="home-feature-context">{featured.context}</p>
+            <h1>{featured.title}</h1>
+            <p className="home-feature-description">{featured.description}</p>
+            <div className="home-feature-actions">
+              {featured.catalog ? (
+                <button className="primary" onClick={() => onOpenCatalog(featured.catalog!)}>
+                  <Play size={18} fill="currentColor" /> Watch now
+                </button>
+              ) : null}
+            </div>
+          </motion.div>
+        </AnimatePresence>
+        <motion.div className="home-command-actions" variants={shouldReduceMotion ? { hidden: { opacity: 0 }, show: { opacity: 1 } } : fadeUpVariant}>
+          <button
             className="hero-search-trigger home-command-search"
-            transition={{ layout: { type: "spring", stiffness: 420, damping: 38, mass: 0.78 } }}
-            whileTap={{ scale: 0.992 }}
             onClick={onOpenSearch}
           >
             <Search size={20} />
             <span>{query.trim() || "Search anime, films, OVAs..."}</span>
             {loading ? <Loader2 className="spin" size={18} /> : <ChevronRight size={19} />}
-          </motion.button>
-          <p className="home-command-hint">Pick a language, choose a provider, and keep the same search while you compare sources.</p>
+          </button>
+          <p className="home-command-hint">Search stays attached to the provider you choose.</p>
           <div className="home-command-shortcuts">
             <button onClick={onShowMyList}><Star size={16} /> My List</button>
             {!session.hosted && <button onClick={onShowDownloads}><HardDrive size={16} /> Downloads <span>{downloadCount}</span></button>}
+            <button onClick={onShowSettings}><Settings2 size={16} /> Settings</button>
             {onShowAdmin && <button onClick={onShowAdmin}><ShieldCheck size={16} /> Users</button>}
             {onSignOut && <button onClick={onSignOut}><LogOut size={16} /> Sign out {session.username}</button>}
           </div>
         </motion.div>
+        {featureSlides.length > 1 ? (
+          <div className="home-feature-controls" aria-label="Featured title controls">
+            <button onClick={showPreviousFeature} aria-label="Previous featured title"><ChevronLeft size={17} /></button>
+            <button onClick={() => setFeaturePaused((paused) => !paused)} aria-label={featurePaused ? "Play featured titles" : "Pause featured titles"}>
+              {featurePaused ? <Play size={16} /> : <Pause size={16} />}
+            </button>
+            <button onClick={showNextFeature} aria-label="Next featured title"><ChevronRight size={17} /></button>
+            <div className="home-feature-dots" role="group" aria-label="Choose featured title">
+              {featureSlides.map((slide, index) => (
+                <button
+                  key={slide.id}
+                  className={featureIndex === index ? "active" : ""}
+                  onClick={() => setFeatureIndex(index)}
+                  aria-label={`Show ${slide.title}`}
+                  aria-current={featureIndex === index ? "true" : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </motion.div>
 
       <div className="dashboard-shelves">
@@ -1303,7 +1651,7 @@ function CatalogRow({
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index * 0.025, 0.15) }}
             >
-              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+              <img src={anime.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
               <span>{anime.title}</span>
               <small>{anime.personalMatch != null ? `${anime.personalMatch}% match` : anime.score ? `${anime.score}% score` : anime.format || "Anime"}</small>
             </motion.button>
@@ -1470,11 +1818,18 @@ function CatalogPage({
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(true);
   const currentYear = new Date().getFullYear();
+  const networkSort = sort === "personalMatch" ? "trending" : sort;
+  const visibleItems = useMemo(() => {
+    if (sort !== "personalMatch") return items;
+    return [...items].sort((left, right) =>
+      (right.personalMatch ?? right.score ?? 0) - (left.personalMatch ?? left.score ?? 0),
+    );
+  }, [items, sort]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void api.getCatalog(filters, sort, page)
+    void api.getCatalog(filters, networkSort, page)
       .then((result) => {
         if (cancelled) return;
         setItems(result.items);
@@ -1484,7 +1839,7 @@ function CatalogPage({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [filters.genre, filters.season, filters.year, filters.format, filters.status, sort, page]);
+  }, [filters.genre, filters.season, filters.year, filters.format, filters.status, networkSort, page]);
 
   function updateFilter<K extends keyof CatalogFilters>(key: K, value: CatalogFilters[K]) {
     setPage(1);
@@ -1495,41 +1850,41 @@ function CatalogPage({
     <motion.section className="catalog-browser" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
       <header className="catalog-browser-header">
         <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
-        <div><span>Discover</span><h1>Trending catalog</h1></div>
-        <select value={sort} onChange={(event) => { setPage(1); setSort(event.target.value); }} aria-label="Sort catalog">
+        <div><span>AniList discovery</span><h1>Trending catalog</h1><p>Refine the live catalog, then rank this page locally for your taste.</p></div>
+      </header>
+      <div className="catalog-filter-bar">
+        <label className="catalog-sort-control"><span>Order</span><select value={sort} onChange={(event) => { setPage(1); setSort(event.target.value); }} aria-label="Sort catalog">
           <option value="personalMatch">Personal Match</option>
           <option value="trending">Trending</option>
           <option value="popularity">Popularity</option>
           <option value="score">AniList Score</option>
           <option value="newest">Newest</option>
           <option value="title">Title</option>
-        </select>
-      </header>
-      <div className="catalog-filter-bar">
-        <select value={filters.genre || ""} onChange={(event) => updateFilter("genre", event.target.value)} aria-label="Genre">
+        </select></label>
+        <label><span>Genre</span><select value={filters.genre || ""} onChange={(event) => updateFilter("genre", event.target.value)} aria-label="Genre">
           <option value="">All genres</option>
           {genres.map((genre) => <option value={genre} key={genre}>{genre}</option>)}
-        </select>
-        <select value={filters.season || ""} onChange={(event) => updateFilter("season", event.target.value)} aria-label="Season">
+        </select></label>
+        <label><span>Season</span><select value={filters.season || ""} onChange={(event) => updateFilter("season", event.target.value)} aria-label="Season">
           <option value="">All seasons</option><option value="WINTER">Winter</option><option value="SPRING">Spring</option><option value="SUMMER">Summer</option><option value="FALL">Fall</option>
-        </select>
-        <select value={filters.year || ""} onChange={(event) => updateFilter("year", event.target.value ? Number(event.target.value) : null)} aria-label="Year">
+        </select></label>
+        <label><span>Year</span><select value={filters.year || ""} onChange={(event) => updateFilter("year", event.target.value ? Number(event.target.value) : null)} aria-label="Year">
           <option value="">All years</option>
           {Array.from({ length: 15 }, (_, index) => currentYear - index).map((year) => <option value={year} key={year}>{year}</option>)}
-        </select>
-        <select value={filters.format || ""} onChange={(event) => updateFilter("format", event.target.value)} aria-label="Format">
+        </select></label>
+        <label><span>Format</span><select value={filters.format || ""} onChange={(event) => updateFilter("format", event.target.value)} aria-label="Format">
           <option value="">All formats</option><option value="TV">TV</option><option value="MOVIE">Movie</option><option value="OVA">OVA</option><option value="ONA">ONA</option><option value="TV_SHORT">Short</option>
-        </select>
-        <select value={filters.status || ""} onChange={(event) => updateFilter("status", event.target.value)} aria-label="Status">
+        </select></label>
+        <label><span>Status</span><select value={filters.status || ""} onChange={(event) => updateFilter("status", event.target.value)} aria-label="Status">
           <option value="">All statuses</option><option value="RELEASING">Releasing</option><option value="FINISHED">Finished</option><option value="NOT_YET_RELEASED">Upcoming</option>
-        </select>
+        </select></label>
       </div>
       <div className="catalog-grid" aria-busy={loading}>
         {loading
           ? Array.from({ length: 12 }, (_, index) => <div className="catalog-card skeleton" key={index} />)
-          : items.map((anime) => (
+          : visibleItems.map((anime) => (
             <button className="catalog-card" key={anime.catalogId} onClick={() => onOpen(anime)}>
-              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+              <img src={anime.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
               <span>{anime.title}</span>
               <small>{anime.personalMatch != null ? `${anime.personalMatch}% match` : anime.score ? `${anime.score}% score` : anime.format || "Anime"}</small>
             </button>
@@ -1627,7 +1982,10 @@ function SearchStage({
     setMobilePreviewOpen(previewOpen);
     if (!window.matchMedia("(max-width: 760px)").matches) return;
     window.requestAnimationFrame(() => {
-      inputRef.current?.closest(".search-stage")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      inputRef.current
+        ?.closest(".search-stage")
+        ?.querySelector(".search-layout")
+        ?.scrollIntoView({ behavior: "auto", block: "nearest" });
     });
   }
 
@@ -1646,10 +2004,10 @@ function SearchStage({
   return (
     <motion.section
       className="search-stage"
-      initial={{ opacity: 0, scale: 0.975, y: 22, filter: "blur(10px)" }}
-      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.982, y: 16, filter: "blur(8px)" }}
-      transition={{ type: "spring", stiffness: 340, damping: 34, mass: 0.82 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
     >
       <img className="search-stage-watermark" src={LOGO_SRC} alt="" aria-hidden="true" />
       <div className="search-command-panel">
@@ -1657,11 +2015,7 @@ function SearchStage({
           <IconButton label="Back" onClick={onBack}>
             <ArrowLeft size={21} />
           </IconButton>
-          <motion.div
-            layoutId="app-search-shell"
-            className="search-input-shell"
-            transition={{ layout: { type: "spring", stiffness: 420, damping: 38, mass: 0.78 } }}
-          >
+          <div className="search-input-shell">
             <Search size={20} />
             <input
               ref={inputRef}
@@ -1673,12 +2027,12 @@ function SearchStage({
               }}
             />
             {loading && <Loader2 className="spin" size={19} />}
-          </motion.div>
+          </div>
         </div>
         <div className="search-source-row">
           <div className="language-switch" aria-label="Subtitle language">
-            <button className={languageGroup === "english" ? "active" : ""} onClick={() => onLanguageChange("english")}>🇺🇸 English</button>
-            <button className={languageGroup === "vietnamese" ? "active" : ""} onClick={() => onLanguageChange("vietnamese")}>🇻🇳 Vietnamese</button>
+            <button className={languageGroup === "english" ? "active" : ""} onClick={() => onLanguageChange("english")}>English</button>
+            <button className={languageGroup === "vietnamese" ? "active" : ""} onClick={() => onLanguageChange("vietnamese")}>Vietnamese</button>
           </div>
           <div className="availability-strip" aria-label="Available providers">
             {languageSources.map((source) => {
@@ -1741,50 +2095,37 @@ function SearchStage({
       {query.trim().length < 2 && !recoverySource && (
         <motion.section
           className="search-welcome"
-          initial={{ opacity: 0, y: 18, scale: 0.985 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -10, scale: 0.99 }}
-          transition={{ type: "spring", stiffness: 300, damping: 30, mass: 0.85 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
         >
-          <div className="search-welcome-brand">
-            <div className="search-welcome-logo-wrap">
-              <img src={LOGO_SRC} alt="ani-desk" />
-            </div>
-            <div className="search-welcome-copy">
-              <p className="search-welcome-kicker"><Sparkles size={15} /> Search across your favorite sources</p>
-              <h1>Find the story you want tonight.</h1>
-              <p>Start with two letters. ani-desk keeps your query in place while you switch language and provider.</p>
-              <div className="search-suggestions" aria-label="Search suggestions">
-                {["One Piece", "Naruto", "Your Name"].map((suggestion) => (
-                  <button
-                    type="button"
-                    key={suggestion}
-                    onClick={() => {
-                      onQueryChange(suggestion);
-                      inputRef.current?.focus();
-                    }}
-                  >
-                    <Search size={15} />
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
+          <div className="search-welcome-copy">
+            <h1>Search {selectedSource?.name ?? "a provider"}</h1>
+            <p>Type at least two letters. Your query stays in place when you switch language or source.</p>
+            <div className="search-suggestions" aria-label="Search suggestions">
+              {["One Piece", "Naruto", "Your Name"].map((suggestion) => (
+                <button
+                  type="button"
+                  key={suggestion}
+                  onClick={() => {
+                    onQueryChange(suggestion);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <Search size={15} />
+                  {suggestion}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="search-tip-grid">
-            <article>
-              <Film size={19} />
-              <div><strong>Search provider-first</strong><span>Choose the source you trust, then compare without retyping.</span></div>
-            </article>
-            <article>
-              <SlidersHorizontal size={19} />
-              <div><strong>Match your subtitles</strong><span>Switch between English and Vietnamese before opening a title.</span></div>
-            </article>
-            <article>
-              <Download size={19} />
-              <div><strong>Save an episode</strong><span>Open a result and use the download control beside any episode.</span></div>
-            </article>
-          </div>
+          <aside className="search-welcome-provider">
+            <Film size={22} />
+            <div>
+              <strong>{selectedSource?.name ?? "Choose a provider"}</strong>
+              <span>{selectedSource ? `${selectedSource.language} · ${providerStatusLabel(selectedSource)}` : "Select a source above to search its catalog."}</span>
+            </div>
+          </aside>
         </motion.section>
       )}
 
@@ -1805,17 +2146,11 @@ function SearchStage({
                     onSelectProviderResult(anime);
                     setMobileSearchStep(true);
                   }}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 380,
-                    damping: 30,
-                    delay: Math.min(index * 0.012, 0.12),
-                  }}
-                  whileHover={{ x: 2, y: -1 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.16, delay: Math.min(index * 0.01, 0.08) }}
                 >
-                  <img src={anime.coverUrl || LOGO_SRC} alt="" />
+                  <img src={anime.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
                   <span>{anime.title}</span>
                   <small>{anime.provider} / {anime.language}</small>
                 </motion.button>
@@ -1840,9 +2175,9 @@ function SearchStage({
             <motion.div
               className="search-preview"
               key={selectedCatalog?.catalogId ?? (selectedAnime ? animeKey(selectedAnime.provider, selectedAnime.id) : "empty")}
-              initial={{ opacity: 0, scale: 0.985, x: 18 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.99, x: -18 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
               <button
@@ -1856,7 +2191,6 @@ function SearchStage({
               {selectedCatalog || selectedAnime ? (
                 <>
                   <div className="preview-art" style={{ backgroundImage: `url(${previewImage})` }} />
-                  <img className="preview-poster-fallback" src={selectedCatalog?.coverUrl || selectedAnime?.coverUrl || LOGO_SRC} alt="" />
                   <div className="preview-copy">
                     <p className="eyebrow">{selectedAnime ? `${selectedAnime.provider} / ${selectedAnime.language}` : "Catalog title"}</p>
                     <h1>{previewTitle}</h1>
@@ -2062,23 +2396,19 @@ function DownloadsPage({
         </button>
       </header>
 
-      <div className="download-summary-grid">
-        <article>
-          <span>On this device</span>
-          <strong>{availableCount}</strong>
-          <small>{downloads.length === availableCount ? "All files available" : `${downloads.length - availableCount} file${downloads.length - availableCount === 1 ? "" : "s"} missing`}</small>
-        </article>
-        <article>
-          <span>Storage used</span>
-          <strong>{formatBytes(totalBytes)}</strong>
-          <small>Managed inside your ani-desk Downloads folder</small>
-        </article>
-        <article>
-          <span>Activity</span>
-          <strong>{active.length || "Quiet"}</strong>
-          <small>{active.length ? `${active.length} transfer${active.length === 1 ? "" : "s"} need attention` : "No active transfers"}</small>
-        </article>
-      </div>
+      <section className="download-overview">
+        <div className="download-overview-copy">
+          <span className="eyebrow">Ready anywhere</span>
+          <h2>Your offline cinema</h2>
+          <p>Saved episodes stay together here, with transfer progress and quick access to every local file.</p>
+        </div>
+        <dl className="download-overview-stats">
+          <div><dt>Available</dt><dd>{availableCount}</dd></div>
+          <div><dt>Storage</dt><dd>{formatBytes(totalBytes)}</dd></div>
+          <div><dt>Transfers</dt><dd>{active.length || "Quiet"}</dd></div>
+        </dl>
+        {downloads.length !== availableCount ? <p className="download-missing-note">{downloads.length - availableCount} local file{downloads.length - availableCount === 1 ? " is" : "s are"} missing.</p> : null}
+      </section>
 
       {active.length > 0 && (
         <section className="download-section">
@@ -2090,7 +2420,7 @@ function DownloadsPage({
             {active.map((item) => (
               <article className={`download-active-card ${item.status}`} key={item.key}>
                 <div className="download-cover">
-                  <img src={item.coverUrl || LOGO_SRC} alt="" />
+                  <img src={item.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
                   {item.status === "error" ? <AlertTriangle size={20} /> : <Download size={20} />}
                 </div>
                 <div className="download-copy">
@@ -2116,7 +2446,7 @@ function DownloadsPage({
           <div className="download-library-list">
             {downloads.map((item) => (
               <motion.article layout className={item.fileExists ? "download-library-row" : "download-library-row missing"} key={item.id}>
-                <img src={item.coverUrl || LOGO_SRC} alt="" />
+                <img src={item.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
                 <div className="download-library-copy">
                   <span>{item.provider} · {formatDownloadDate(item.completedAt)}</span>
                   <strong>{item.animeTitle}</strong>
@@ -2363,7 +2693,7 @@ function AnimeCard({
   return (
     <motion.article whileHover={{ scale: 1.04, y: -8 }} className="poster-card">
       <button className="poster-click" onClick={() => onOpen(anime)}>
-        <img src={anime.coverUrl || LOGO_SRC} alt="" loading="lazy" />
+        <img src={anime.coverUrl || LOGO_SRC} alt="" loading="lazy" onError={useLogoFallback} />
         <span>{anime.title}</span>
         <small>{anime.provider} / {anime.language}</small>
       </button>
@@ -2417,7 +2747,7 @@ function HistoryCard({
     <motion.article whileHover={{ scale: 1.035, y: -7 }} className="poster-card history">
       <button className="poster-click" onClick={() => onOpen(item)}>
         <div className="poster-image-wrapper">
-          <img src={item.coverUrl || LOGO_SRC} alt="" loading="lazy" />
+          <img src={item.coverUrl || LOGO_SRC} alt="" loading="lazy" onError={useLogoFallback} />
           <div className="play-overlay">
             <Film size={28} />
           </div>
@@ -2492,7 +2822,6 @@ function DetailPage({
   const [episodeQuery, setEpisodeQuery] = useState("");
   const [latestFirst, setLatestFirst] = useState(false);
   const [rangeIndex, setRangeIndex] = useState(0);
-  const [jumpEpisode, setJumpEpisode] = useState("");
   const [highlightEpisodeNumber, setHighlightEpisodeNumber] = useState<number | null>(null);
   const episodeListRef = useRef<HTMLDivElement | null>(null);
 
@@ -2547,7 +2876,6 @@ function DetailPage({
 
   const firstEpisode = sortedEpisodes[0];
   const latestEpisode = sortedEpisodes[sortedEpisodes.length - 1];
-  const jumpTarget = sortedEpisodes.find((episode) => episode.number === Number(jumpEpisode));
   const resumeEpisode = resumeHistory
     ? episodes.find((episode) => episode.number === resumeHistory.episodeNumber)
     : undefined;
@@ -2570,25 +2898,20 @@ function DetailPage({
     }
   }
 
-  function playJumpTarget() {
-    if (!jumpTarget) return;
-    focusEpisode(jumpTarget);
-  }
-
   return (
     <motion.section
       className="detail-page"
-      initial={{ opacity: 0, scale: 0.975, y: 22, filter: "blur(10px)" }}
-      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.985, y: 14, filter: "blur(8px)" }}
-      transition={{ type: "spring", stiffness: 330, damping: 34, mass: 0.85 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
     >
       <div className="detail-page-shell">
-        <IconButton label="Back" className="detail-back-button" onClick={onBack}>
-          <ArrowLeft size={21} />
-        </IconButton>
         <div className="detail-chooser-grid" style={{ "--detail-bg": `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` } as React.CSSProperties}>
           <aside className="episode-range-panel">
+            <IconButton label="Back" className="detail-back-button" onClick={onBack}>
+              <ArrowLeft size={21} />
+            </IconButton>
             <div className="episode-range-heading">
               <p className="eyebrow">{anime.provider}</p>
               <h3>Ranges</h3>
@@ -2664,30 +2987,30 @@ function DetailPage({
                 <Search size={17} />
                 <input
                   value={episodeQuery}
-                  placeholder="Episode number or title"
+                  placeholder="Find episode by number or title"
                   onChange={(event) => setEpisodeQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || !/^\d+$/.test(episodeQuery.trim())) return;
+                    const exactEpisode = sortedEpisodes.find((episode) => episode.number === Number(episodeQuery.trim()));
+                    if (!exactEpisode) return;
+                    event.preventDefault();
+                    focusEpisode(exactEpisode);
+                  }}
                 />
               </label>
               <div className="episode-sort">
                 <button className={!latestFirst ? "active" : ""} onClick={() => setLatestFirst(false)}>First</button>
                 <button className={latestFirst ? "active" : ""} onClick={() => setLatestFirst(true)}>Latest</button>
               </div>
-              <div className="episode-jump">
-                <input
-                  value={jumpEpisode}
-                  inputMode="numeric"
-                  placeholder="Jump"
-                  onChange={(event) => setJumpEpisode(event.target.value.replace(/\D/g, ""))}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") playJumpTarget();
-                  }}
-                />
-                <button disabled={!jumpTarget} onClick={playJumpTarget}>Go</button>
-              </div>
             </div>
             <div className="episode-list-shell">
               {loading ? <p className="empty-state">Loading episodes...</p> : null}
-              {!loading && !visibleEpisodes.length ? <p className="empty-state">No episodes match your filter.</p> : null}
+              {!loading && !episodes.length ? (
+                <p className="empty-state">No playable episodes are currently available from {anime.provider}.</p>
+              ) : null}
+              {!loading && episodes.length > 0 && !visibleEpisodes.length ? (
+                <p className="empty-state">No episodes match your filter.</p>
+              ) : null}
               <AnimatePresence mode="popLayout">
                 <motion.div
                   ref={episodeListRef}
@@ -2722,7 +3045,7 @@ function DetailPage({
                         whileTap={{ scale: 0.995 }}
                       >
                         <span className="episode-thumb">
-                          {episode.thumbnail ? <img src={episode.thumbnail} alt="" loading="lazy" /> : <Play size={18} />}
+                          {episode.thumbnail ? <img src={episode.thumbnail} alt="" loading="lazy" onError={useLogoFallback} /> : <Play size={18} />}
                         </span>
                         <span className="episode-row-copy">
                           <strong>Episode {episode.number}</strong>
@@ -2754,14 +3077,14 @@ function DetailPage({
           <aside className="detail-info-panel">
             <div className="detail-poster-stage">
               <div className="detail-poster-glow" style={{ backgroundImage: `url(${anime.bannerUrl || anime.coverUrl || LOGO_SRC})` }} />
-              <img src={anime.coverUrl || LOGO_SRC} alt="" />
+              <img src={anime.coverUrl || LOGO_SRC} alt="" onError={useLogoFallback} />
             </div>
             <div className="detail-info-copy">
               <p className="eyebrow">{anime.provider} / {anime.language}</p>
               <h2>{anime.title}</h2>
               <p>{anime.synopsis || "Episodes are loaded directly from the selected source."}</p>
               <div className="preview-meta">
-                <span><Film size={16} /> {episodes.length || anime.totalEpisodes || 0} episodes</span>
+                <span><Film size={16} /> {loading ? `${anime.totalEpisodes || 0} expected` : `${episodes.length} playable`}</span>
                 <span><SlidersHorizontal size={16} /> {activeRangeLabel}</span>
               </div>
               <div className="detail-actions">
@@ -2771,9 +3094,9 @@ function DetailPage({
                     Resume E{resumeEpisode.number}
                   </button>
                 )}
-                <button className={resumeEpisode ? "" : "primary"} disabled={!firstEpisode} onClick={() => firstEpisode && onPlay(firstEpisode)}>
+                <button className={!resumeEpisode && firstEpisode ? "primary" : ""} disabled={!firstEpisode} onClick={() => firstEpisode && onPlay(firstEpisode)}>
                   <Play size={18} />
-                  Episode 1
+                  {firstEpisode ? `Episode ${firstEpisode.number}` : "Unavailable"}
                 </button>
                 <button disabled={!latestEpisode} onClick={() => latestEpisode && onPlay(latestEpisode)}>
                   <Clock size={18} />
@@ -2825,6 +3148,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const qualityRef = useRef("auto");
   const savingAtRef = useRef(0);
   const controlsTimerRef = useRef<number | null>(null);
+  const skipFeedbackTimerRef = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [quality, setQuality] = useState("auto");
   const [levels, setLevels] = useState<QualityLevel[]>([]);
@@ -2834,6 +3158,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [skipFeedback, setSkipFeedback] = useState<{ amount: number; id: number } | null>(null);
   const streamIsHls = context.playback.streamKind === "hls" || context.playback.originalUrl.toLowerCase().includes(".m3u8");
   const streamIsDash = context.playback.streamKind === "dash" || context.playback.originalUrl.toLowerCase().includes(".mpd");
   const subtitleTracks = context.playback.subtitles.filter((item) => item.url);
@@ -2903,36 +3228,44 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
         if (!disposed) setError(`The DASH player could not start (${String(loadError)}).`);
       });
     } else if (streamIsHls) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({ capLevelToPlayerSize: true, enableWorker: true });
-        hlsRef.current = hls;
-        hls.attachMedia(video);
-        hls.loadSource(context.playback.playbackUrl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (disposed) return;
-          setLevels(hls.levels.map((level, index) => ({ index, label: formatLevel(level, index) })));
-          applyHlsQuality(hls, qualityRef.current);
-          startPlayback();
-        });
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (!data.fatal || disposed) return;
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
-          } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 1) {
-            networkRetries += 1;
-            hls.startLoad();
-          } else {
-            const detail = data.details ? ` (${data.details})` : "";
-            setError(`The browser player failed to load this HLS stream${detail}. Try mpv fallback.`);
-            hls.destroy();
-          }
-        });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = context.playback.playbackUrl;
         video.addEventListener("loadedmetadata", startPlayback, { once: true });
         video.load();
       } else {
-        setError("This system WebView cannot play HLS streams. Use mpv fallback.");
+        void import("hls.js").then(({ default: HlsRuntime }) => {
+          if (disposed) return;
+          if (!HlsRuntime.isSupported()) {
+            setError("This system WebView cannot play HLS streams. Use mpv fallback.");
+            return;
+          }
+
+          const hls = new HlsRuntime({ capLevelToPlayerSize: true, enableWorker: true });
+          hlsRef.current = hls;
+          hls.attachMedia(video);
+          hls.loadSource(context.playback.playbackUrl);
+          hls.on(HlsRuntime.Events.MANIFEST_PARSED, () => {
+            if (disposed) return;
+            setLevels(hls.levels.map((level, index) => ({ index, label: formatLevel(level, index) })));
+            applyHlsQuality(hls, qualityRef.current);
+            startPlayback();
+          });
+          hls.on(HlsRuntime.Events.ERROR, (_event, data) => {
+            if (!data.fatal || disposed) return;
+            if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else if (data.type === HlsRuntime.ErrorTypes.NETWORK_ERROR && networkRetries < 1) {
+              networkRetries += 1;
+              hls.startLoad();
+            } else {
+              const detail = data.details ? ` (${data.details})` : "";
+              setError(`The browser player failed to load this HLS stream${detail}. Try mpv fallback.`);
+              hls.destroy();
+            }
+          });
+        }).catch((loadError) => {
+          if (!disposed) setError(`The HLS player could not start (${String(loadError)}).`);
+        });
       }
     } else {
       video.src = context.playback.playbackUrl;
@@ -2985,7 +3318,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     }, 15000);
 
     return () => window.clearInterval(saveInterval);
-  });
+  }, [context.anime.id, context.episode.id]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3027,6 +3360,10 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   useEffect(() => {
     revealControls();
   }, [isPlaying]);
+
+  useEffect(() => () => {
+    if (skipFeedbackTimerRef.current) window.clearTimeout(skipFeedbackTimerRef.current);
+  }, []);
 
   function revealControls() {
     setShowControls(true);
@@ -3090,6 +3427,9 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     const max = Number.isFinite(video.duration) ? video.duration : video.currentTime + seconds;
     video.currentTime = Math.max(0, Math.min(max, video.currentTime + seconds));
     setCurrentTime(video.currentTime);
+    setSkipFeedback({ amount: seconds, id: Date.now() });
+    if (skipFeedbackTimerRef.current) window.clearTimeout(skipFeedbackTimerRef.current);
+    skipFeedbackTimerRef.current = window.setTimeout(() => setSkipFeedback(null), 850);
     void saveProgress(true);
   }
 
@@ -3159,10 +3499,10 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   return (
     <motion.div
       className={showControls ? "player-overlay controls-visible" : "player-overlay"}
-      initial={{ opacity: 0, scale: 0.985, filter: "blur(12px)" }}
-      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.99, filter: "blur(10px)" }}
-      transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       onMouseMove={revealControls}
       onClick={revealControls}
     >
@@ -3223,6 +3563,22 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
         <button onClick={() => seekBy(10)} aria-label="Forward 10 seconds">
           <SkipForward size={30} />
         </button>
+        <AnimatePresence mode="wait">
+          {skipFeedback ? (
+            <motion.div
+              key={skipFeedback.id}
+              className="player-skip-feedback"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.14 }}
+              role="status"
+              aria-live="polite"
+            >
+              {skipFeedback.amount > 0 ? "+" : "−"}{Math.abs(skipFeedback.amount)} seconds
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
 
       <div className="player-bottom">
@@ -3291,6 +3647,14 @@ function EmptyPanel({ title, compact = false }: { title: string; compact?: boole
       <h2>{title}</h2>
     </div>
   );
+}
+
+function useLogoFallback(event: SyntheticEvent<HTMLImageElement>) {
+  const image = event.currentTarget;
+  if (image.dataset.fallbackApplied === "true") return;
+  image.dataset.fallbackApplied = "true";
+  image.src = LOGO_SRC;
+  image.classList.add("media-fallback");
 }
 
 function IconButton({
@@ -3420,6 +3784,60 @@ function loadSavedSourceName() {
 function saveSourceName(sourceName: string) {
   try {
     localStorage.setItem(SOURCE_STORAGE_KEY, sourceName);
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+}
+
+function loadSavedTheme(): AppTheme {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "obsidian" || saved === "oled" || saved === "system") return saved;
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+  return "obsidian";
+}
+
+function saveTheme(theme: AppTheme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+}
+
+function loadSavedScale(): AppScale {
+  try {
+    const saved = localStorage.getItem(APP_SCALE_STORAGE_KEY);
+    if (saved === "compact" || saved === "comfortable" || saved === "large") return saved;
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+  return "comfortable";
+}
+
+function saveScale(scale: AppScale) {
+  try {
+    localStorage.setItem(APP_SCALE_STORAGE_KEY, scale);
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+}
+
+function loadSavedFont(): AppFont {
+  try {
+    const saved = localStorage.getItem(APP_FONT_STORAGE_KEY);
+    if (saved === "manrope" || saved === "noto" || saved === "system") return saved;
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+  return "manrope";
+}
+
+function saveFont(font: AppFont) {
+  try {
+    localStorage.setItem(APP_FONT_STORAGE_KEY, font);
   } catch {
     // localStorage can be unavailable in restricted WebView contexts.
   }

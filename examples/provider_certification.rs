@@ -180,12 +180,16 @@ async fn certify_anime(
         .get_stream_url(&episode.id)
         .await
         .context("stream resolution failed")?;
+    let media_host = reqwest::Url::parse(&stream.video_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| "unparseable-host".to_string());
     println!(
-        "  {} stream: {} [{}] -> {}",
+        "  {} stream: {} [{}] -> media host {}",
         provider.name(),
         anime.title,
         anime.id,
-        stream.video_url
+        media_host
     );
 
     let mut headers = HeaderMap::new();

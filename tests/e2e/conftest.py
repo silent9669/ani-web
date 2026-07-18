@@ -2,6 +2,8 @@ import os
 import time
 import socket
 import subprocess
+import json
+from urllib.parse import urlparse
 import pytest
 from playwright.sync_api import sync_playwright
 
@@ -59,6 +61,7 @@ def mocked_page(page, vite_server):
                 sources: [
                     { name: "AllAnime", language: "English", languageGroup: "english", status: "healthy", failureCode: null, websiteUrl: null, verificationUrl: "https://api.allanime.day/api", capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
                     { name: "AnimeGG", language: "English", languageGroup: "english", status: "healthy", failureCode: null, websiteUrl: "https://www.animegg.org", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: false } },
+                    { name: "MovieBox", language: "English", languageGroup: "english", status: "healthy", failureCode: null, websiteUrl: "https://moviebox.ph", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
                     { name: "KKPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, websiteUrl: "https://www.kkphim.com", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } },
                     { name: "OPhim", language: "Vietnamese", languageGroup: "vietnamese", status: "healthy", failureCode: null, websiteUrl: "https://ophim19.cc", verificationUrl: null, capabilities: { search: true, details: true, episodes: true, playback: true, subtitles: true } }
                 ],
@@ -338,12 +341,12 @@ def mocked_page(page, vite_server):
                 return {
                     coverUrl: "https://example.com/details.jpg",
                     bannerUrl: "https://example.com/banner.jpg",
-                    totalEpisodes: state.episode_count || 1200,
+                    totalEpisodes: state.episode_count ?? 1200,
                     synopsis: "Detailed synopsis of the selected anime."
                 };
             } else if (cmd === "get_episodes") {
                 const eps = [];
-                const total = state.episode_count || 1200;
+                const total = state.episode_count ?? 1200;
                 for (let i = 1; i <= total; i++) {
                     eps.push({
                         id: `ep-${i}`,
@@ -469,3 +472,113 @@ def mocked_page(page, vite_server):
 def mobile_mocked_page(mocked_page):
     mocked_page.set_viewport_size({"width": 390, "height": 844})
     return mocked_page
+
+
+@pytest.fixture(scope="function")
+def hosted_page(page, vite_server):
+    state = {
+        "signed_in": False,
+        "users": [
+            {
+                "id": "family-admin",
+                "username": "family-admin",
+                "role": "admin",
+                "enabled": True,
+                "protected": True,
+                "createdAt": "2026-07-18T00:00:00Z",
+            }
+        ],
+        "requests": [],
+    }
+    console_errors = []
+    page_errors = []
+    sources = [
+        {"name": "AllAnime", "language": "English", "languageGroup": "english", "status": "degraded", "failureCode": None, "websiteUrl": None, "verificationUrl": "https://api.allanime.day/api", "capabilities": {"search": True, "details": True, "episodes": True, "playback": True, "subtitles": True}},
+        {"name": "AnimeGG", "language": "English", "languageGroup": "english", "status": "healthy", "failureCode": None, "websiteUrl": "https://www.animegg.org", "verificationUrl": None, "capabilities": {"search": True, "details": True, "episodes": True, "playback": True, "subtitles": False}},
+        {"name": "MovieBox", "language": "English", "languageGroup": "english", "status": "healthy", "failureCode": None, "websiteUrl": "https://moviebox.ph", "verificationUrl": None, "capabilities": {"search": True, "details": True, "episodes": True, "playback": True, "subtitles": True}},
+        {"name": "KKPhim", "language": "Vietnamese", "languageGroup": "vietnamese", "status": "healthy", "failureCode": None, "websiteUrl": "https://www.kkphim.com", "verificationUrl": None, "capabilities": {"search": True, "details": True, "episodes": True, "playback": True, "subtitles": True}},
+        {"name": "OPhim", "language": "Vietnamese", "languageGroup": "vietnamese", "status": "healthy", "failureCode": None, "websiteUrl": "https://ophim19.cc", "verificationUrl": None, "capabilities": {"search": True, "details": True, "episodes": True, "playback": True, "subtitles": True}},
+    ]
+    user = {"id": "family-admin", "username": "family-admin", "role": "admin"}
+
+    def fulfill_json(route, payload, status=200):
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def handle_api(route):
+        path = urlparse(route.request.url).path
+        method = route.request.method
+
+        if path == "/api/session" and method == "GET":
+            if state["signed_in"]:
+                fulfill_json(route, user)
+            else:
+                fulfill_json(route, {"code": "AUTH_REQUIRED", "message": "Sign in to continue.", "operation": "auth", "retryable": False}, 401)
+        elif path == "/api/login" and method == "POST":
+            state["signed_in"] = True
+            fulfill_json(route, user)
+        elif path == "/api/logout" and method == "POST":
+            state["signed_in"] = False
+            route.fulfill(status=204, body="")
+        elif path == "/api/admin/users" and method == "GET":
+            fulfill_json(route, state["users"])
+        elif path == "/api/admin/users" and method == "POST":
+            payload = json.loads(route.request.post_data or "{}")
+            created = {
+                "id": f"family-user-{len(state['users'])}",
+                "username": payload["username"],
+                "role": payload["role"],
+                "enabled": True,
+                "protected": False,
+                "createdAt": "2026-07-18T01:00:00Z",
+            }
+            state["users"].append(created)
+            state["requests"].append({
+                "method": method,
+                "path": path,
+                "body": payload,
+                "request_marker": route.request.headers.get("x-ani-desk-request"),
+            })
+            fulfill_json(route, created)
+        elif path.startswith("/api/admin/users/") and method == "PUT":
+            payload = json.loads(route.request.post_data or "{}")
+            user_id = path.rsplit("/", 1)[-1]
+            managed_user = next(item for item in state["users"] if item["id"] == user_id)
+            managed_user.update({
+                "username": payload["username"],
+                "role": payload["role"],
+                "enabled": payload["enabled"],
+            })
+            state["requests"].append({
+                "method": method,
+                "path": path,
+                "body": payload,
+                "request_marker": route.request.headers.get("x-ani-desk-request"),
+            })
+            route.fulfill(status=204, body="")
+        elif path in ("/api/sources", "/api/providers/health"):
+            fulfill_json(route, sources)
+        elif path in ("/api/history", "/api/my-list"):
+            fulfill_json(route, [])
+        elif path == "/api/discovery":
+            fulfill_json(route, {"trending": [], "popularThisSeason": [], "genres": []})
+        else:
+            fulfill_json(route, {"code": "NOT_FOUND", "message": f"Unhandled hosted test route: {method} {path}"}, 404)
+
+    page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    page.route("**/api/**", handle_api)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto("http://127.0.0.1:1420")
+    page.wait_for_selector(".login-screen")
+    setattr(page, "ani_console_errors", console_errors)
+    setattr(page, "ani_page_errors", page_errors)
+    setattr(page, "ani_hosted_state", state)
+    return page
+
+
+@pytest.fixture(scope="function")
+def mobile_hosted_page(hosted_page):
+    hosted_page.set_viewport_size({"width": 390, "height": 844})
+    hosted_page.reload()
+    hosted_page.wait_for_selector(".login-screen")
+    return hosted_page

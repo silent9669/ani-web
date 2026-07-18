@@ -73,7 +73,7 @@ impl Default for SourcesConfig {
         Self {
             allanime: true,
             animegg: true,
-            moviebox: false,
+            moviebox: true,
             kkphim: true,
             ophim: true,
             animevietsub: false,

@@ -76,6 +76,7 @@ struct MediaSession {
     expires_at: Instant,
     stream: StreamInfo,
     secret: [u8; 32],
+    resources: Arc<Mutex<HashMap<String, Url>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -263,8 +264,7 @@ struct ProviderQuery {
 
 #[derive(Debug, Deserialize)]
 struct ResourceQuery {
-    url: String,
-    sig: String,
+    token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -980,13 +980,14 @@ async fn playback(
     let id = Uuid::new_v4().to_string();
     let mut secret = [0_u8; 32];
     OsRng.fill_bytes(&mut secret);
+    let mut resources = HashMap::new();
     let subtitles = stream
         .subtitles
         .iter()
         .filter_map(|subtitle| {
             Url::parse(&subtitle.url).ok().map(|url| SubtitleDto {
                 language: subtitle.language.clone(),
-                url: signed_resource_url(&id, &secret, &url),
+                url: registered_resource_url(&id, &secret, &mut resources, &url),
             })
         })
         .collect();
@@ -1010,12 +1011,14 @@ async fn playback(
             expires_at: now + Duration::from_secs(6 * 60 * 60),
             stream: stream.clone(),
             secret,
+            resources: Arc::new(Mutex::new(resources)),
         },
     );
+    let playback_url = format!("/api/media/{id}");
     Ok(Json(PlaybackDto {
         session_id: id.clone(),
-        playback_url: format!("/api/media/{id}"),
-        original_url: stream.video_url.clone(),
+        playback_url: playback_url.clone(),
+        original_url: playback_url,
         stream_kind: if stream.video_url.to_ascii_lowercase().contains(".m3u8") {
             "hls"
         } else if stream.video_url.to_ascii_lowercase().contains(".mpd") {
@@ -1057,25 +1060,13 @@ async fn media_resource(
 ) -> ApiResult<Response> {
     let user = require_user(&state, &headers).await?;
     let session = get_media_session(&state, &id, &user.id).await?;
-    verify_resource_signature(&session.secret, &query.url, &query.sig)?;
-    let url = Url::parse(&query.url).map_err(|error| {
-        ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "INVALID_MEDIA_RESOURCE",
-            "playback",
-            error.to_string(),
-            false,
-        )
-    })?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "INVALID_MEDIA_RESOURCE",
-            "playback",
-            "Only HTTP media resources are supported.",
-            false,
-        ));
-    }
+    let url = session
+        .resources
+        .lock()
+        .await
+        .get(&query.token)
+        .cloned()
+        .ok_or_else(invalid_media_resource)?;
     proxy_media_url(&state, &id, &session, url, &headers).await
 }
 
@@ -1089,19 +1080,16 @@ async fn media_dash_resource(
     let Some(value) = path.strip_prefix("base/") else {
         return Err(invalid_dash_resource());
     };
-    let mut parts = value.splitn(3, '/');
-    let encoded_base = parts.next().unwrap_or_default();
-    let signature = parts.next().unwrap_or_default();
+    let mut parts = value.splitn(2, '/');
+    let token = parts.next().unwrap_or_default();
     let relative_path = parts.next().unwrap_or_default();
-    let base_bytes = URL_SAFE_NO_PAD
-        .decode(encoded_base)
-        .map_err(|_| invalid_dash_resource())?;
-    let base_value = String::from_utf8(base_bytes).map_err(|_| invalid_dash_resource())?;
-    verify_resource_signature(&session.secret, &base_value, signature)?;
-    let base = Url::parse(&base_value).map_err(|_| invalid_dash_resource())?;
-    if !matches!(base.scheme(), "http" | "https") {
-        return Err(invalid_dash_resource());
-    }
+    let base = session
+        .resources
+        .lock()
+        .await
+        .get(token)
+        .cloned()
+        .ok_or_else(invalid_dash_resource)?;
     let upstream = resolve_dash_upstream(base, relative_path)?;
     proxy_media_url(&state, &id, &session, upstream, &headers).await
 }
@@ -1121,6 +1109,10 @@ fn resolve_dash_upstream(base: Url, relative_path: &str) -> ApiResult<Url> {
 }
 
 fn invalid_dash_resource() -> ApiError {
+    invalid_media_resource()
+}
+
+fn invalid_media_resource() -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
         "INVALID_MEDIA_RESOURCE",
@@ -1215,7 +1207,9 @@ async fn proxy_media_url(
                     true,
                 )
             })?;
-        let rewritten = rewrite_hls_manifest(session_id, &session.secret, &url, &text);
+        let mut resources = session.resources.lock().await;
+        let rewritten =
+            rewrite_hls_manifest(session_id, &session.secret, &url, &text, &mut resources);
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
@@ -1251,7 +1245,9 @@ async fn proxy_media_url(
                     true,
                 )
             })?;
-        let rewritten = rewrite_dash_manifest(session_id, &session.secret, &url, &text);
+        let mut resources = session.resources.lock().await;
+        let rewritten =
+            rewrite_dash_manifest(session_id, &session.secret, &url, &text, &mut resources);
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/dash+xml; charset=utf-8")
@@ -1286,7 +1282,13 @@ async fn proxy_media_url(
         .map_err(|error| ApiError::internal("playback", error))
 }
 
-fn rewrite_hls_manifest(session_id: &str, secret: &[u8; 32], base: &Url, manifest: &str) -> String {
+fn rewrite_hls_manifest(
+    session_id: &str,
+    secret: &[u8; 32],
+    base: &Url,
+    manifest: &str,
+    resources: &mut HashMap<String, Url>,
+) -> String {
     manifest
         .lines()
         .map(|line| {
@@ -1297,14 +1299,17 @@ fn rewrite_hls_manifest(session_id: &str, secret: &[u8; 32], base: &Url, manifes
             if !trimmed.starts_with('#') {
                 return base
                     .join(trimmed)
-                    .map(|url| signed_resource_url(session_id, secret, &url))
+                    .map(|url| registered_resource_url(session_id, secret, resources, &url))
                     .unwrap_or_else(|_| line.to_string());
             }
             if let Some(uri) = quoted_attribute(trimmed, "URI") {
                 if let Ok(url) = base.join(&uri) {
                     return line.replacen(
                         &format!("URI=\"{uri}\""),
-                        &format!("URI=\"{}\"", signed_resource_url(session_id, secret, &url)),
+                        &format!(
+                            "URI=\"{}\"",
+                            registered_resource_url(session_id, secret, resources, &url)
+                        ),
                         1,
                     );
                 }
@@ -1320,6 +1325,7 @@ fn rewrite_dash_manifest(
     secret: &[u8; 32],
     manifest_url: &Url,
     manifest: &str,
+    resources: &mut HashMap<String, Url>,
 ) -> String {
     let mut output = String::with_capacity(manifest.len() + 128);
     let mut remaining = manifest;
@@ -1338,7 +1344,9 @@ fn rewrite_dash_manifest(
         let absolute = manifest_url
             .join(original)
             .unwrap_or_else(|_| manifest_url.clone());
-        output.push_str(&signed_dash_base(session_id, secret, &absolute));
+        output.push_str(&registered_dash_base(
+            session_id, secret, resources, &absolute,
+        ));
         output.push_str("</BaseURL>");
         remaining = &remaining[close + "</BaseURL>".len()..];
         found_base = true;
@@ -1357,7 +1365,7 @@ fn rewrite_dash_manifest(
                 insert_at,
                 &format!(
                     "<BaseURL>{}</BaseURL>",
-                    signed_dash_base(session_id, secret, &parent)
+                    registered_dash_base(session_id, secret, resources, &parent)
                 ),
             );
         }
@@ -1365,47 +1373,36 @@ fn rewrite_dash_manifest(
     output
 }
 
-fn signed_dash_base(session_id: &str, secret: &[u8; 32], base: &Url) -> String {
-    let encoded = URL_SAFE_NO_PAD.encode(base.as_str());
-    let signature = resource_signature(secret, base.as_str());
-    format!("/api/media/{session_id}/dash/base/{encoded}/{signature}/")
+fn registered_dash_base(
+    session_id: &str,
+    secret: &[u8; 32],
+    resources: &mut HashMap<String, Url>,
+    base: &Url,
+) -> String {
+    let token = register_media_resource(secret, resources, base);
+    format!("/api/media/{session_id}/dash/base/{token}/")
 }
 
-fn signed_resource_url(session_id: &str, secret: &[u8; 32], url: &Url) -> String {
-    let encoded = url::form_urlencoded::byte_serialize(url.as_str().as_bytes()).collect::<String>();
-    format!(
-        "/api/media/{session_id}/resource?url={encoded}&sig={}",
-        resource_signature(secret, url.as_str())
-    )
+fn registered_resource_url(
+    session_id: &str,
+    secret: &[u8; 32],
+    resources: &mut HashMap<String, Url>,
+    url: &Url,
+) -> String {
+    let token = register_media_resource(secret, resources, url);
+    format!("/api/media/{session_id}/resource?token={token}")
 }
 
-fn resource_signature(secret: &[u8; 32], value: &str) -> String {
+fn register_media_resource(
+    secret: &[u8; 32],
+    resources: &mut HashMap<String, Url>,
+    url: &Url,
+) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("fixed-size HMAC key");
-    mac.update(value.as_bytes());
-    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
-}
-
-fn verify_resource_signature(secret: &[u8; 32], value: &str, signature: &str) -> ApiResult<()> {
-    let signature = URL_SAFE_NO_PAD.decode(signature).map_err(|_| {
-        ApiError::new(
-            StatusCode::FORBIDDEN,
-            "INVALID_MEDIA_RESOURCE",
-            "playback",
-            "The media resource signature is invalid.",
-            false,
-        )
-    })?;
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("fixed-size HMAC key");
-    mac.update(value.as_bytes());
-    mac.verify_slice(&signature).map_err(|_| {
-        ApiError::new(
-            StatusCode::FORBIDDEN,
-            "INVALID_MEDIA_RESOURCE",
-            "playback",
-            "The media resource signature is invalid.",
-            false,
-        )
-    })
+    mac.update(url.as_str().as_bytes());
+    let token = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    resources.insert(token.clone(), url.clone());
+    token
 }
 
 async fn my_list(
@@ -2195,18 +2192,49 @@ mod tests {
     fn dash_rewrite_signs_existing_and_default_base_urls() {
         let manifest_url = Url::parse("https://cdn.example/show/manifest.mpd").unwrap();
         let secret = [7_u8; 32];
+        let mut resources = HashMap::new();
         let with_base = rewrite_dash_manifest(
             "session",
             &secret,
             &manifest_url,
             "<MPD><Period><BaseURL>video/</BaseURL></Period></MPD>",
+            &mut resources,
         );
         assert!(with_base.contains("/api/media/session/dash/base/"));
         assert!(!with_base.contains(">video/</BaseURL>"));
+        assert!(!with_base.contains("cdn.example"));
 
-        let without_base =
-            rewrite_dash_manifest("session", &secret, &manifest_url, "<MPD><Period /></MPD>");
+        let without_base = rewrite_dash_manifest(
+            "session",
+            &secret,
+            &manifest_url,
+            "<MPD><Period /></MPD>",
+            &mut resources,
+        );
         assert!(without_base.starts_with("<MPD><BaseURL>/api/media/session/dash/base/"));
+        assert!(resources
+            .values()
+            .any(|url| url.host_str() == Some("cdn.example")));
+    }
+
+    #[test]
+    fn hls_rewrite_uses_opaque_resource_tokens() {
+        let manifest_url =
+            Url::parse("https://cdn.example/show/master.m3u8?secret=upstream").unwrap();
+        let secret = [9_u8; 32];
+        let mut resources = HashMap::new();
+        let rewritten = rewrite_hls_manifest(
+            "session",
+            &secret,
+            &manifest_url,
+            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin?token=hidden\"\nsegment.ts?token=hidden",
+            &mut resources,
+        );
+
+        assert!(rewritten.contains("/api/media/session/resource?token="));
+        assert!(!rewritten.contains("cdn.example"));
+        assert!(!rewritten.contains("token=hidden"));
+        assert_eq!(resources.len(), 2);
     }
 
     #[test]
