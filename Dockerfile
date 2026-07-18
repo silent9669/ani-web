@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY web ./web
+COPY tokens.css ./tokens.css
 COPY scripts ./scripts
 RUN npm run build
 
@@ -15,11 +16,12 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY src-tauri ./src-tauri
 COPY server ./server
-RUN cargo build --locked --release -p ani-desk-server
+RUN cargo build --locked --release -p ani-desk-server \
+    && strip target/release/ani-desk-server
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gosu \
+    && apt-get install -y --no-install-recommends ca-certificates curl gosu \
     && rm -rf /var/lib/apt/lists/* \
     && printf 'precedence ::ffff:0:0/96  100\n' >> /etc/gai.conf \
     && groupadd --system ani-desk \

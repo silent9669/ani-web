@@ -621,4 +621,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "42");
     }
+
+    #[tokio::test]
+    #[ignore = "live provider certification; run explicitly when reconsidering MovieBox"]
+    async fn live_moviebox_health_smoke() {
+        MovieBoxProvider::new().health_check().await.unwrap();
+    }
 }

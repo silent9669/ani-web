@@ -4,34 +4,39 @@
 
 Redesign `ani-desk` from its current functional UI into a premium, animated Netflix-clone experience — simple layout, powerful lightweight animations, with macOS 26 Liquid Glass support.
 
-## Status: R1-R4 Implemented, v1.0.2 Catalog And Provider Pass In Validation
+## Status: R1-R7 Implemented, v1.0.10 Desktop Review Build
 
 The previous agent session completed:
 - [x] Codebase analysis and architecture mapping
-- [x] E2E test suite design (74 test cases in `tests/e2e/`)
+- [x] E2E test suite design (103 collected cases in `tests/e2e/`; current local result: 102 passed, 1 expected xfail)
 - [x] **Core Layout & Liquid Glass foundation** — compact fixed Home/Search/detail layout plus macOS transparent titlebar foundation
-- [x] **Animated Search** — shared search-shell zoom, fixed search surface, independent result scrolling
-- [x] **Episode Selection Page** — three-panel detail route with range rail, active episode list, poster/details, search, sort, jump, resume/latest/first
+- [x] **Animated Search** — restrained opacity transitions, fixed desktop workbench, contained two-step mobile results/preview flow, and independent result scrolling
+- [x] **Episode Selection Page** — three-panel desktop route and single-column mobile picker with one combined episode finder, range rail, sort, resume/latest/first
 - [x] **Signed updater foundation** — in-app update prompt plus signed Tauri updater metadata for v1.0.1+
 - [x] **macOS DMG polish** — dark/red drag-to-Applications background and `xattr -cr /Applications/ani-desk.app` unsigned-app guidance
 - [x] **AniList catalog Home/Search** — provider-independent discovery with language and availability selection in Search
 - [x] **Provider health and typed errors** — cached health, retry, stable codes, redacted diagnostics, and correlation IDs
-- [x] **English playback certification** — AllAnime is CAPTCHA-gated, AnimeGG passes live playback certification, and MovieBox is health-gated while its signed API returns `miss token`
-- [ ] **Cross-platform release validation** — Windows/Linux bundles and tap brewbot run in GitHub release workflow
+- [x] **English playback certification** — AnimeGG and MovieBox pass the multi-title live media gate; repaired AllAnime passes One Piece but remains limited for titles without a playable upstream source
+- [x] **Responsive family web app** — authenticated hosted UI, provider-specific search, settings, user management, and phone/desktop navigation
+- [x] **Desktop Cinema 2.0** — rotating cinematic feature stage, separated content rails, provider-first search, three-pane episode workbench, and distraction-free player controls
+- [ ] **Release validation** — intentionally deferred until the local app is reviewed; no tag, push, deployment, or release workflow should run yet
 
 ---
 
 ## R1. Dashboard Refinement
 
-**Current state**: `HomeDashboard` component (App.tsx L445-555) already has:
-- Compact command center with `logo.png`, wordmark, and animated search trigger
+**Current state**: `HomeDashboard` now has:
+- Native-only cinematic feature artwork with an honest Resume or View episodes action
+- A compact command surface for provider-first Search, My List, Downloads, and Settings
 - Continue Watching, Trending, and seasonal/genre Explore rows
 - Provider controls are intentionally absent from Home
 
-**What to improve**:
-- Implemented smooth entrance animations, shelf fade-ins, glass-backed controls, card hover effects, and shimmer loading.
-- Home is fixed to the app viewport with a command/search surface plus three compact discovery shelves.
-- The previous large featured anime hero has been removed; artwork remains in cards, search preview, and detail pages.
+**What changed**:
+- The feature stage rotates through local Continue Watching entries first and AniList Trending entries second; AniList is not used to populate local history.
+- Continue Watching is the first populated rail and is separated from the stage by a clear rule and its own content region.
+- Glass is reserved for navigation and actions. Artwork and poster rails stay solid for contrast and performance.
+- The essential feature content and primary action fit inside a 1280×800 first screen, and reduced-motion mode uses opacity-only feedback.
+- Missing remote artwork falls back to the black-background ani-desk mark instead of browser broken-image chrome.
 
 ---
 
@@ -43,10 +48,10 @@ The previous agent session completed:
 - Auto-focus input on mount
 - AnimatePresence transitions on preview panel
 
-**What to improve**:
-- Implemented shared `layoutId` zoom from the Home search trigger to the Search input shell.
-- Search results now reveal with staggered motion and the preview panel has smoother scale/slide transitions.
-- Search remains fixed to the viewport; only the left result pane scrolls.
+**Implemented**:
+- Search uses opacity-only feedback instead of a large shared-layout zoom.
+- The selected provider and persistent query remain the primary search context.
+- Desktop results scroll inside their pane; mobile uses a contained Results → Preview flow with a reliable back control.
 
 ---
 
@@ -54,12 +59,12 @@ The previous agent session completed:
 
 **Current state**: `DetailPage` is a dedicated route with:
 - Left range rail for 50-episode chunks
-- Middle active-range episode list with search, sort, and jump-to-episode
+- Middle active-range episode list with one combined title/number finder and sort controls
 - Right vertical poster/details panel with synopsis, provider metadata, Resume, First, Latest, and My List actions
 
 **What to change**:
 - Converted from modal to a dedicated `detail` route with contextual Back navigation.
-- Episode rows support thumbnails, range paging, search, first/latest sorting, exact jump/highlight, resume/latest/first actions, and internal pane scrolling.
+- Episode rows support thumbnails, range paging, title filtering, numeric Enter-to-jump/highlight, first/latest sorting, resume/latest/first actions, and internal pane scrolling.
 - Only the active episode range is rendered.
 
 ---
@@ -70,7 +75,7 @@ The previous agent session completed:
 - Use Tauri's native titlebar/window appearance APIs on macOS
 - Add CSS `backdrop-filter: blur()` + translucent backgrounds matching Apple's Liquid Glass guidelines
 - OS detection at runtime to conditionally apply Liquid Glass styles
-- Fallback to solid dark theme (current `--bg: #050608`, `--panel: rgba(17,19,24,0.82)`) on Windows/Linux/older macOS
+- Fallback to the tokenized Obsidian Cinema dark theme on Windows/Linux/older macOS
 
 **Current foundation**:
 - `titleBarStyle: "Transparent"`, hidden title, native decorations/traffic lights retained.
@@ -83,7 +88,7 @@ The previous agent session completed:
 
 **Current state**: Desktop bundle release path exists for Apple Silicon macOS 15+ DMG/app, Windows NSIS/MSI, and Linux AppImage/deb/rpm. Homebrew Cask metadata exists at `packaging/homebrew/Casks/ani-desk.rb`, with tap-side files under `packaging/homebrew-tap/`. The local tap checkout for deployment validation is `/Users/phucdang/Documents/homebrew-ani-desk`.
 
-**Provider certification**: AllAnime remains the default English source but is currently CAPTCHA-gated by the upstream API and should surface `PROVIDER_CAPTCHA`. AnimeGG is the certified English playback fallback for v1.0.2. MovieBox is health-gated while its signed API returns `miss token`. KKPhim and OPhim are certified Vietnamese playback providers. AnimeVietSub is integrated through AniMapper but remains unavailable when AniMapper stream source resolution fails.
+**Provider certification**: AllAnime remains the default English source and has the current encrypted request/decryption flow plus manual Cloudflare recovery. Its One Piece flow passes real media, while the tested Kimi no Na wa entry currently has no playable upstream source. AnimeGG and MovieBox pass the English multi-title gate. KKPhim and OPhim pass Vietnamese playback certification. Retired duplicate/broken adapters remain outside the active registry.
 
 **Verify**: Launch from Finder/Dock, Start Menu/taskbar, and Linux desktop launcher. The terminal command remains a developer fallback only.
 
@@ -95,7 +100,6 @@ The previous agent session completed:
 ```bash
 npm run build
 npm run check:icons
-npm run check:release-version -- v1.0.2
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -103,12 +107,21 @@ cargo audit
 cargo run --example provider_certification -- --require-english
 pytest tests/e2e
 npm run tauri -- build --debug --no-bundle
-TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
-npm run tauri -- build --bundles app,dmg
+npm run tauri -- build --debug --bundles app
 ```
 
-GitHub release deployment is prepared through CI/CD but should run only after local UI and bundle smoke tests pass.
+GitHub release deployment is prepared through CI/CD but must remain untouched until the local UI and app bundle are reviewed.
+
+---
+
+## R7. Desktop-first product split
+
+The current repository intentionally supports two editions from the same React route tree:
+
+- `edition-desktop`: macOS, Windows, and Linux native application. Includes downloads, local player fallback, cinematic Home, and desktop workbenches.
+- `edition-web`: authenticated hosted edition. Keeps login, private per-user data, and the admin console; desktop-only download behavior remains absent.
+
+The future homelab repository will be named `ani-web`. Do not copy the current CSS blindly. Reuse `design.md`, `tokens.css`, provider-first search semantics, authentication contracts, and server architecture as context, then redesign the hosted routes in that repository when explicitly requested.
 
 ---
 

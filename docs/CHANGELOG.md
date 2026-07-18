@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-07-18
+### Added
+- Added MovieBox as a certified English provider with provider-first catalog search.
+- Added an Obsidian Cinema interface with split family login, responsive side/bottom navigation, provider settings, appearance variants, and bundled fonts.
+- Added a loopback-only homelab Compose target and command-line deployment, monitoring, backup, restore, update, rollback, and incident documentation.
+- Added one repeatable macOS build, launch, log, debug, and process-verification entrypoint, wired to the Codex Run action.
+- Added a desktop-only cinematic feature stage, live provider-health rail, and Netflix/Apple TV content rhythm while preserving the hosted edition for the later `ani-web` redesign.
+- Added desktop layout checks at 1280×800 and an explicit reduced-motion path that keeps route feedback while removing spatial animation.
+- Added an eight-second Home feature rotation that starts with local Continue Watching entries, then uses AniList only for Trending discovery, with pause, previous/next, hover/focus pause, and reduced-motion safeguards.
+- Added compact/comfortable/large interface sizing and Manrope, Noto Sans, and system reading-font preferences with Vietnamese glyph coverage.
+
+### Fixed
+- Repaired the current AllAnime encrypted request and response flow while retaining manual Cloudflare recovery.
+- Restored the black favicon background across generated web icon sizes.
+- Replaced upstream media addresses in hosted playback responses and rewritten manifests with opaque, user-bound proxy tokens.
+- Deferred HLS and DASH player engines until playback starts, reducing the initial web JavaScript payload from about 862 KB to 353 KB.
+- Kept macOS release proc-macro libraries loadable by disabling Cargo's release-time stripping.
+- Filtered empty OPhim trailer records from episode counts and removed provider HTML from synopsis text.
+- Removed provider HTML from KKPhim synopsis text, added broken-artwork fallback to the black ani-desk mark, and kept the detail workbench clear of the floating desktop navigation rail.
+- Separated Continue Watching from the feature stage, removed the provider health card from navigation, and contained the mobile Search results/preview steps so hidden panes cannot intercept taps.
+- Consolidated episode filtering and numeric navigation into one finder, and added compact `−10 seconds` / `+10 seconds` playback feedback without enlarging the timeline.
+- Tightened the episode workbench, aligned the Downloads navigation and library, and reduced the Home feature interval to 6.5 seconds while retaining pause-on-hover, pause-on-focus, and reduced-motion behavior.
+- Limited Settings to theme, interface size, and Vietnamese-compatible reading font controls on one responsive page.
+- Increased search artwork visibility while preserving title readability and provider-first result selection.
+- Added independent English and Vietnamese live-playback release gates while keeping blocked providers visible with honest degraded states.
+
+### Security
+- Kept hosted provider headers and media addresses server-side, with authenticated six-hour playback sessions and opaque resource lookup.
+- Invalidated every existing family-account session when an administrator resets that account's password.
+
 ## [1.0.9] - 2026-07-14
 ### Added
 - Added a persistent Apple-style desktop download library with play, reveal, missing-file detection, storage totals, and guarded deletion.

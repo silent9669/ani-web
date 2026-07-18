@@ -32,9 +32,11 @@ data/
 .env
 .env.*
 !.env.example
+!.env.homelab.example
 
 # Development/Agent files
 __pycache__/
+.hallmark/
 .agent/
 .agents/
 .githooks/

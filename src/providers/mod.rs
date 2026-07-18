@@ -134,6 +134,10 @@ impl ProviderRegistry {
             providers.push(Arc::new(animegg::AnimeGgProvider::new()));
         }
 
+        if config.sources.moviebox {
+            providers.push(Arc::new(moviebox::MovieBoxProvider::new()));
+        }
+
         if config.sources.hianime {
             providers.push(Arc::new(hianime::HiAnimeProvider::new()));
         }
@@ -215,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_omits_retired_and_duplicate_sources() {
+    fn registry_includes_certified_sources_and_omits_retired_duplicates() {
         let mut config = Config::default();
         config.sources.moviebox = true;
         config.sources.animevietsub = true;
@@ -228,7 +232,7 @@ mod tests {
             .map(|provider| provider.name())
             .collect::<Vec<_>>();
 
-        assert!(!names.contains(&"MovieBox"));
+        assert!(names.contains(&"MovieBox"));
         assert!(!names.contains(&"AnimeVietSub"));
         assert!(!names.contains(&"AnimeTVN"));
         assert!(!names.contains(&"Niniyo"));

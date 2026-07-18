@@ -7,8 +7,10 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<()> {
     let require_english = std::env::args().any(|argument| argument == "--require-english");
+    let require_vietnamese = std::env::args().any(|argument| argument == "--require-vietnamese");
     let registry = ProviderRegistry::new(&Config::default());
     let mut healthy_english = 0usize;
+    let mut healthy_vietnamese = 0usize;
     let mut failures = Vec::new();
 
     for provider in registry.list_providers() {
@@ -21,6 +23,8 @@ async fn main() -> Result<()> {
                 println!("PASS {} ({})", provider.name(), provider.language());
                 if provider.language() == Language::English {
                     healthy_english += 1;
+                } else if provider.language() == Language::Vietnamese {
+                    healthy_vietnamese += 1;
                 }
             }
             Err(error) => {
@@ -33,6 +37,12 @@ async fn main() -> Result<()> {
     if require_english && healthy_english == 0 {
         anyhow::bail!(
             "release blocked: no English provider passed live playback certification; failures: {}",
+            failures.join(", ")
+        );
+    }
+    if require_vietnamese && healthy_vietnamese == 0 {
+        anyhow::bail!(
+            "release blocked: no Vietnamese provider passed live playback certification; failures: {}",
             failures.join(", ")
         );
     }
@@ -180,12 +190,16 @@ async fn certify_anime(
         .get_stream_url(&episode.id)
         .await
         .context("stream resolution failed")?;
+    let media_host = reqwest::Url::parse(&stream.video_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| "unparseable-host".to_string());
     println!(
-        "  {} stream: {} [{}] -> {}",
+        "  {} stream: {} [{}] -> media host {}",
         provider.name(),
         anime.title,
         anime.id,
-        stream.video_url
+        media_host
     );
 
     let mut headers = HeaderMap::new();
