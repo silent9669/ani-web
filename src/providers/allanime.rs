@@ -211,14 +211,17 @@ impl AllAnimeProvider {
         );
         let digest = Sha256::digest(iv_seed.as_bytes());
         let iv = &digest[..12];
-        let payload = format!(
-            r#"{{"v":1,"ts":{},"epoch":{},"buildId":"{}","qh":"{}"}}"#,
-            timestamp_ms, self.crypto.epoch, self.crypto.build_id, ALLANIME_QUERY_HASH
-        );
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "v": 1,
+            "ts": timestamp_ms,
+            "epoch": self.crypto.epoch,
+            "buildId": self.crypto.build_id,
+            "qh": ALLANIME_QUERY_HASH,
+        }))?;
         let cipher = Aes256Gcm::new_from_slice(&self.crypto.key)
             .context("failed to initialize AllAnime AES-GCM cipher")?;
         let ciphertext_and_tag = cipher
-            .encrypt(Nonce::from_slice(iv), payload.as_bytes())
+            .encrypt(Nonce::from_slice(iv), payload.as_slice())
             .map_err(|_| anyhow::anyhow!("failed to encrypt AllAnime aaReq token"))?;
 
         let mut token = Vec::with_capacity(1 + iv.len() + ciphertext_and_tag.len());
@@ -1567,7 +1570,8 @@ https://cdn.example/720/index.m3u8
 
     #[test]
     fn aa_req_token_contains_current_profile_and_rounded_timestamp() {
-        let provider = AllAnimeProvider::new();
+        let mut provider = AllAnimeProvider::new();
+        provider.crypto.build_id = "custom\"build\\id\nnext".to_string();
         let timestamp_ms = 1_720_000_200_000;
         let token = provider.generate_aa_req_at(timestamp_ms).unwrap();
         let decoded = base64::engine::general_purpose::STANDARD

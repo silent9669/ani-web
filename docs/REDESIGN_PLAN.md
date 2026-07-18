@@ -8,7 +8,7 @@ Redesign `ani-desk` from its current functional UI into a premium, animated Netf
 
 The previous agent session completed:
 - [x] Codebase analysis and architecture mapping
-- [x] E2E test suite design (101 collected cases in `tests/e2e/`; current local result: 100 passed, 1 expected failure)
+- [x] E2E test suite design (103 collected cases in `tests/e2e/`; current local result: 102 passed, 1 expected xfail)
 - [x] **Core Layout & Liquid Glass foundation** — compact fixed Home/Search/detail layout plus macOS transparent titlebar foundation
 - [x] **Animated Search** — restrained opacity transitions, fixed desktop workbench, contained two-step mobile results/preview flow, and independent result scrolling
 - [x] **Episode Selection Page** — three-panel desktop route and single-column mobile picker with one combined episode finder, range rail, sort, resume/latest/first

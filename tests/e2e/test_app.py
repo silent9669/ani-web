@@ -299,6 +299,7 @@ def test_t1_mobile_hosted_login_settings_theme_and_logout(mobile_hosted_page):
     mobile_hosted_page.get_by_role("button", name="Sign in").click()
 
     expect(mobile_hosted_page.locator(".home-command-center")).to_be_visible()
+    mobile_hosted_page.ani_console_errors.clear()
     mobile_hosted_page.locator(".app-navigation-items button:has-text('Settings')").click()
     expect(mobile_hosted_page.locator(".settings-page")).to_be_visible()
     expect(mobile_hosted_page.locator(".provider-setting")).to_have_count(0)
@@ -333,11 +334,7 @@ def test_t1_mobile_hosted_login_settings_theme_and_logout(mobile_hosted_page):
     mobile_hosted_page.locator(".app-navigation-items button:has-text('Home')").click()
     mobile_hosted_page.get_by_role("button", name="Sign out family-admin").click()
     expect(mobile_hosted_page.get_by_role("heading", name="Sign in")).to_be_visible()
-    unexpected_console_errors = [
-        message for message in mobile_hosted_page.ani_console_errors
-        if "401 (Unauthorized)" not in message
-    ]
-    assert unexpected_console_errors == []
+    assert mobile_hosted_page.ani_console_errors == []
     assert mobile_hosted_page.ani_page_errors == []
 
 

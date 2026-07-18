@@ -343,6 +343,7 @@ impl AnimeProvider for OphimProvider {
                         a_priority.cmp(&b_priority)
                     });
 
+                    let search_num = episode_number.parse::<u32>().unwrap_or(0);
                     'outer: for server in sorted_servers {
                         if let Some(server_data) =
                             server.get("server_data").and_then(|s| s.as_array())
@@ -350,8 +351,6 @@ impl AnimeProvider for OphimProvider {
                             for ep in server_data {
                                 let name = ep["name"].as_str().unwrap_or("");
                                 let ep_num = Self::episode_number(name).unwrap_or_default();
-                                let search_num = episode_number.parse::<u32>().unwrap_or(0);
-
                                 if ep_num == search_num {
                                     if let Some(link) = ep["link_m3u8"].as_str() {
                                         if !link.is_empty() {

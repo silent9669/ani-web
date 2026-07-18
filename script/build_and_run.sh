@@ -53,10 +53,16 @@ case "$MODE" in
     ;;
   --verify|verify)
     open_app
+    stable_checks=0
     for _ in {1..20}; do
       if pgrep -x "$APP_NAME" >/dev/null; then
-        echo "$APP_NAME launched successfully from $APP_BUNDLE"
-        exit 0
+        stable_checks=$((stable_checks + 1))
+        if [[ "$stable_checks" -ge 3 ]]; then
+          echo "$APP_NAME launched successfully and remained stable from $APP_BUNDLE"
+          exit 0
+        fi
+      else
+        stable_checks=0
       fi
       sleep 1
     done

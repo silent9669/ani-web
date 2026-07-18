@@ -1541,9 +1541,11 @@ function HomeDashboard({
         {featureSlides.length > 1 ? (
           <div className="home-feature-controls" aria-label="Featured title controls">
             <button onClick={showPreviousFeature} aria-label="Previous featured title"><ChevronLeft size={17} /></button>
-            <button onClick={() => setFeaturePaused((paused) => !paused)} aria-label={featurePaused ? "Play featured titles" : "Pause featured titles"}>
-              {featurePaused ? <Play size={16} /> : <Pause size={16} />}
-            </button>
+            {!shouldReduceMotion && (
+              <button onClick={() => setFeaturePaused((paused) => !paused)} aria-label={featurePaused ? "Play featured titles" : "Pause featured titles"}>
+                {featurePaused ? <Play size={16} /> : <Pause size={16} />}
+              </button>
+            )}
             <button onClick={showNextFeature} aria-label="Next featured title"><ChevronRight size={17} /></button>
             <div className="home-feature-dots" role="group" aria-label="Choose featured title">
               {featureSlides.map((slide, index) => (
@@ -3143,6 +3145,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
 
     let disposed = false;
     let networkRetries = 0;
+    let mediaRetries = 0;
 
     setError(null);
     setLevels([]);
@@ -3225,7 +3228,8 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
           });
           hls.on(HlsRuntime.Events.ERROR, (_event, data) => {
             if (!data.fatal || disposed) return;
-            if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR) {
+            if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR && mediaRetries < 1) {
+              mediaRetries += 1;
               hls.recoverMediaError();
             } else if (data.type === HlsRuntime.ErrorTypes.NETWORK_ERROR && networkRetries < 1) {
               networkRetries += 1;

@@ -11,7 +11,7 @@
   background: var(--color-paper);
   font-family: var(--font-body);
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
   -webkit-font-smoothing: antialiased;
   --bg: var(--color-paper);
   --panel: var(--color-glass);
@@ -7069,10 +7069,10 @@ select:focus-visible {
   *,
   *::before,
   *::after {
-    animation-duration: 150ms !important;
+    animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
-    transition-duration: 150ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

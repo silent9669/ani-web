@@ -10,7 +10,7 @@ use ani_desk_core::{
 use anyhow::{Context, Result};
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, RawQuery, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post, put},
@@ -45,6 +45,8 @@ use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "ani_desk_session";
 const MAX_MEDIA_SESSIONS: usize = 2_048;
+const MAX_MEDIA_RESOURCES: usize = 4_096;
+const MEDIA_RESOURCE_TTL: Duration = Duration::from_secs(30 * 60);
 const LOGIN_ATTEMPT_WINDOW: Duration = Duration::from_secs(15 * 60);
 const LOGIN_ATTEMPT_LIMIT: usize = 8;
 const LOGIN_ATTEMPT_KEY_LIMIT: usize = 10_000;
@@ -76,7 +78,13 @@ struct MediaSession {
     expires_at: Instant,
     stream: StreamInfo,
     secret: [u8; 32],
-    resources: Arc<Mutex<HashMap<String, Url>>>,
+    resources: Arc<Mutex<HashMap<String, MediaResource>>>,
+}
+
+#[derive(Clone)]
+struct MediaResource {
+    url: Url,
+    inserted_at: Instant,
 }
 
 #[derive(Debug, Serialize)]
@@ -1065,7 +1073,7 @@ async fn media_resource(
         .lock()
         .await
         .get(&query.token)
-        .cloned()
+        .map(|resource| resource.url.clone())
         .ok_or_else(invalid_media_resource)?;
     proxy_media_url(&state, &id, &session, url, &headers).await
 }
@@ -1074,6 +1082,7 @@ async fn media_dash_resource(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, path)): Path<(String, String)>,
+    RawQuery(raw_query): RawQuery,
 ) -> ApiResult<Response> {
     let user = require_user(&state, &headers).await?;
     let session = get_media_session(&state, &id, &user.id).await?;
@@ -1088,10 +1097,22 @@ async fn media_dash_resource(
         .lock()
         .await
         .get(token)
-        .cloned()
+        .map(|resource| resource.url.clone())
         .ok_or_else(invalid_dash_resource)?;
-    let upstream = resolve_dash_upstream(base, relative_path)?;
+    let mut upstream = resolve_dash_upstream(base, relative_path)?;
+    append_upstream_query(&mut upstream, raw_query.as_deref());
     proxy_media_url(&state, &id, &session, upstream, &headers).await
+}
+
+fn append_upstream_query(upstream: &mut Url, raw_query: Option<&str>) {
+    let Some(raw_query) = raw_query.filter(|query| !query.is_empty()) else {
+        return;
+    };
+    let combined = match upstream.query() {
+        Some(existing) if !existing.is_empty() => format!("{existing}&{raw_query}"),
+        _ => raw_query.to_string(),
+    };
+    upstream.set_query(Some(&combined));
 }
 
 fn resolve_dash_upstream(base: Url, relative_path: &str) -> ApiResult<Url> {
@@ -1117,7 +1138,7 @@ fn invalid_media_resource() -> ApiError {
         StatusCode::BAD_REQUEST,
         "INVALID_MEDIA_RESOURCE",
         "playback",
-        "The DASH media resource is invalid.",
+        "The media resource is invalid.",
         false,
     )
 }
@@ -1287,7 +1308,7 @@ fn rewrite_hls_manifest(
     secret: &[u8; 32],
     base: &Url,
     manifest: &str,
-    resources: &mut HashMap<String, Url>,
+    resources: &mut HashMap<String, MediaResource>,
 ) -> String {
     manifest
         .lines()
@@ -1325,7 +1346,7 @@ fn rewrite_dash_manifest(
     secret: &[u8; 32],
     manifest_url: &Url,
     manifest: &str,
-    resources: &mut HashMap<String, Url>,
+    resources: &mut HashMap<String, MediaResource>,
 ) -> String {
     let mut output = String::with_capacity(manifest.len() + 128);
     let mut remaining = manifest;
@@ -1376,7 +1397,7 @@ fn rewrite_dash_manifest(
 fn registered_dash_base(
     session_id: &str,
     secret: &[u8; 32],
-    resources: &mut HashMap<String, Url>,
+    resources: &mut HashMap<String, MediaResource>,
     base: &Url,
 ) -> String {
     let token = register_media_resource(secret, resources, base);
@@ -1386,7 +1407,7 @@ fn registered_dash_base(
 fn registered_resource_url(
     session_id: &str,
     secret: &[u8; 32],
-    resources: &mut HashMap<String, Url>,
+    resources: &mut HashMap<String, MediaResource>,
     url: &Url,
 ) -> String {
     let token = register_media_resource(secret, resources, url);
@@ -1395,13 +1416,41 @@ fn registered_resource_url(
 
 fn register_media_resource(
     secret: &[u8; 32],
-    resources: &mut HashMap<String, Url>,
+    resources: &mut HashMap<String, MediaResource>,
     url: &Url,
 ) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("fixed-size HMAC key");
     mac.update(url.as_str().as_bytes());
     let token = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    resources.insert(token.clone(), url.clone());
+    let now = Instant::now();
+    if resources.contains_key(&token) {
+        resources.insert(
+            token.clone(),
+            MediaResource {
+                url: url.clone(),
+                inserted_at: now,
+            },
+        );
+        return token;
+    }
+    resources.retain(|_, resource| now.duration_since(resource.inserted_at) < MEDIA_RESOURCE_TTL);
+    while resources.len() >= MAX_MEDIA_RESOURCES {
+        let Some(oldest) = resources
+            .iter()
+            .min_by_key(|(_, resource)| resource.inserted_at)
+            .map(|(token, _)| token.clone())
+        else {
+            break;
+        };
+        resources.remove(&oldest);
+    }
+    resources.insert(
+        token.clone(),
+        MediaResource {
+            url: url.clone(),
+            inserted_at: now,
+        },
+    );
     token
 }
 
@@ -2214,7 +2263,7 @@ mod tests {
         assert!(without_base.starts_with("<MPD><BaseURL>/api/media/session/dash/base/"));
         assert!(resources
             .values()
-            .any(|url| url.host_str() == Some("cdn.example")));
+            .any(|resource| resource.url.host_str() == Some("cdn.example")));
     }
 
     #[test]
@@ -2247,6 +2296,34 @@ mod tests {
             "https://cdn.example/show/segments/1.m4s"
         );
         assert!(resolve_dash_upstream(base, "https://attacker.example/1.m4s").is_err());
+    }
+
+    #[test]
+    fn dash_resources_preserve_signed_query_parameters() {
+        let base = Url::parse("https://cdn.example/show/manifest.mpd?manifest=1").unwrap();
+        let mut upstream = resolve_dash_upstream(base, "segments/1.m4s?segment=2").unwrap();
+        append_upstream_query(&mut upstream, Some("token=signed&expires=123"));
+        assert_eq!(
+            upstream.as_str(),
+            "https://cdn.example/show/segments/1.m4s?segment=2&token=signed&expires=123"
+        );
+    }
+
+    #[test]
+    fn media_resource_registry_evicts_the_oldest_entry_at_capacity() {
+        let secret = [4_u8; 32];
+        let mut resources = HashMap::new();
+        for index in 0..=MAX_MEDIA_RESOURCES {
+            let url = Url::parse(&format!("https://cdn.example/{index}.ts")).unwrap();
+            register_media_resource(&secret, &mut resources, &url);
+        }
+        assert_eq!(resources.len(), MAX_MEDIA_RESOURCES);
+        assert!(!resources
+            .values()
+            .any(|resource| resource.url.path() == "/0.ts"));
+        assert!(resources
+            .values()
+            .any(|resource| resource.url.path() == format!("/{MAX_MEDIA_RESOURCES}.ts")));
     }
 
     #[test]
