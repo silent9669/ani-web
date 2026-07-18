@@ -4,7 +4,7 @@
 
 Redesign `ani-desk` from its current functional UI into a premium, animated Netflix-clone experience — simple layout, powerful lightweight animations, with macOS 26 Liquid Glass support.
 
-## Status: R1-R7 Implemented, v1.0.9 Desktop Review Build
+## Status: R1-R7 Implemented, v1.0.10 Desktop Review Build
 
 The previous agent session completed:
 - [x] Codebase analysis and architecture mapping

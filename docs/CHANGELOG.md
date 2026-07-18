@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.10] - 2026-07-18
 ### Added
 - Added MovieBox as a certified English provider with provider-first catalog search.
 - Added an Obsidian Cinema interface with split family login, responsive side/bottom navigation, provider settings, appearance variants, and bundled fonts.
@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed provider HTML from KKPhim synopsis text, added broken-artwork fallback to the black ani-desk mark, and kept the detail workbench clear of the floating desktop navigation rail.
 - Separated Continue Watching from the feature stage, removed the provider health card from navigation, and contained the mobile Search results/preview steps so hidden panes cannot intercept taps.
 - Consolidated episode filtering and numeric navigation into one finder, and added compact `−10 seconds` / `+10 seconds` playback feedback without enlarging the timeline.
+- Tightened the episode workbench, aligned the Downloads navigation and library, and reduced the Home feature interval to 6.5 seconds while retaining pause-on-hover, pause-on-focus, and reduced-motion behavior.
+- Limited Settings to theme, interface size, and Vietnamese-compatible reading font controls on one responsive page.
+- Increased search artwork visibility while preserving title readability and provider-first result selection.
+- Added independent English and Vietnamese live-playback release gates while keeping blocked providers visible with honest degraded states.
 
 ### Security
 - Kept hosted provider headers and media addresses server-side, with authenticated six-hour playback sessions and opaque resource lookup.
