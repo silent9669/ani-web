@@ -84,8 +84,10 @@ python3 deploy/homelab/data-guard.py snapshot \
   /srv/ani-desk/data/web.db
 docker compose --env-file /srv/ani-desk/config/ani-desk.env \
   -f deploy/homelab/compose.yml stop ani-desk
-tar -C /srv/ani-desk -czf \
-  /srv/ani-desk/backups/manual-$(date -u +%Y%m%dT%H%M%SZ).tar.gz data
+install -d -m 0750 /srv/ani-desk/backups
+backup_path="/srv/ani-desk/backups/manual-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+tar -C /srv/ani-desk -czf "$backup_path" data
+ls -lh "$backup_path"
 docker compose --env-file /srv/ani-desk/config/ani-desk.env \
   -f deploy/homelab/compose.yml up -d ani-desk caddy
 curl -fsS https://ani.dangphuc.me/api/health
