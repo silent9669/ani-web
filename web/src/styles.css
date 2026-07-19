@@ -8378,3 +8378,126 @@ select:focus-visible {
     width: 0.28rem;
   }
 }
+
+/* TV / 10-foot mode. Smart-TV user agents and large no-hover displays enable
+   this automatically; Settings > Interface size can force it on any browser. */
+@media (min-width: 80rem) and (min-height: 40rem) {
+  :root:is(.platform-tv, [data-scale="tv"]) .app-shell > main {
+    padding-inline-start: 10rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation {
+    inset-block: max(2rem, env(safe-area-inset-top)) max(2rem, env(safe-area-inset-bottom));
+    inset-inline-start: max(2rem, env(safe-area-inset-left));
+    width: 7rem;
+    padding: 0.7rem;
+    border-radius: 2rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation-brand,
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation-items > button {
+    min-height: 5.25rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation-brand img {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation-items {
+    grid-auto-rows: 5.5rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .app-navigation-items > button {
+    gap: 0.45rem;
+    font-size: 0.82rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-dashboard,
+  :root:is(.platform-tv, [data-scale="tv"]) .search-stage,
+  :root:is(.platform-tv, [data-scale="tv"]) .settings-page,
+  :root:is(.platform-tv, [data-scale="tv"]) .grid-page,
+  :root:is(.platform-tv, [data-scale="tv"]) .admin-page {
+    max-width: 118rem;
+    padding: 2rem 3rem 3rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-command-center {
+    min-height: clamp(32rem, 64vh, 48rem);
+    border-radius: 2rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-feature-copy {
+    max-width: min(42rem, 47vw);
+    padding: clamp(2.25rem, 4vw, 4.5rem);
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-feature-copy h1 {
+    max-width: 14ch;
+    font-size: clamp(3.2rem, 4.6vw, 6rem);
+    line-height: 0.98;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-feature-copy > p:not(.home-feature-context) {
+    max-width: 46ch;
+    font-size: 1.1rem;
+    line-height: 1.55;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .hero-search-trigger,
+  :root:is(.platform-tv, [data-scale="tv"]) .home-feature-actions button,
+  :root:is(.platform-tv, [data-scale="tv"]) .home-command-shortcuts button,
+  :root:is(.platform-tv, [data-scale="tv"]) .provider-chip,
+  :root:is(.platform-tv, [data-scale="tv"]) .search-suggestions button,
+  :root:is(.platform-tv, [data-scale="tv"]) .catalog-pagination button {
+    min-height: 3.6rem;
+    padding-inline: 1.25rem;
+    font-size: 1rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .home-dashboard .catalog-card,
+  :root:is(.platform-tv, [data-scale="tv"]) .home-dashboard .poster-card {
+    flex-basis: clamp(11rem, 11vw, 15rem);
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .card-row {
+    gap: 1rem;
+    scroll-padding-inline: 1.5rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .catalog-grid,
+  :root:is(.platform-tv, [data-scale="tv"]) .poster-grid {
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: 1.25rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .search-command-panel,
+  :root:is(.platform-tv, [data-scale="tv"]) .search-workspace,
+  :root:is(.platform-tv, [data-scale="tv"]) .detail-page-shell {
+    border-radius: 2rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .search-result,
+  :root:is(.platform-tv, [data-scale="tv"]) .episode-list-row {
+    min-height: 5.5rem;
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) button:focus-visible,
+  :root:is(.platform-tv, [data-scale="tv"]) a:focus-visible,
+  :root:is(.platform-tv, [data-scale="tv"]) input:focus-visible,
+  :root:is(.platform-tv, [data-scale="tv"]) select:focus-visible,
+  :root:is(.platform-tv, [data-scale="tv"]) [tabindex]:focus-visible {
+    z-index: 4;
+    outline: 0.22rem solid #fff;
+    outline-offset: 0.28rem;
+    box-shadow: 0 0 0 0.5rem color-mix(in srgb, var(--color-accent) 72%, transparent), 0 1rem 2.5rem rgba(0, 0, 0, 0.55);
+    transform: scale(1.035);
+  }
+
+  :root:is(.platform-tv, [data-scale="tv"]) .detail-page-shell,
+  :root:is(.platform-tv, [data-scale="tv"]) .edition-desktop .detail-page-shell {
+    inset-block: 2rem;
+    inset-inline-end: 3rem;
+    inset-inline-start: 10rem !important;
+  }
+}

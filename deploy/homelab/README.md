@@ -46,8 +46,9 @@ in that mounted directory rather than in the replaceable container image.
   protected administrator row in place. Its stable user ID keeps favorites and
   watch history attached; existing sessions are revoked only when credentials
   change.
-- The pull-deploy service stops the application only after a new image builds,
-  archives the data directory before replacement, and retains seven backups.
+- Manual deployment builds the replacement image before the maintenance
+  window. Stop the application only long enough to archive the data directory
+  and recreate the container.
 
 Before a manual update, record the database health and row counts:
 
@@ -65,57 +66,35 @@ Run the same commands after the container is healthy. The integrity result must
 be `ok`, and the counts must not decrease unless an administrator deliberately
 removed those records.
 
-## CI-gated pull deployment
+## Manual deployment only
 
-The production VM uses a pull-based deployment agent. GitHub never receives an
-SSH key for the homelab and no management port is exposed to the internet.
-
-1. A pull request must pass every job in `.github/workflows/ci.yml` before it
-   can merge into `master` in `silent9669/ani-web`.
-2. The three-minute cron wrapper or `ani-desk-deploy.timer` asks the public
-   GitHub Actions API for the latest completed `CI` push run on `master`.
-3. The VM deploys only when that run concluded `success` and its `head_sha`
-   exactly matches the current remote `master` commit.
-4. The agent checks out that exact commit and builds while the old container is
-   still serving. It then briefly stops ani-desk for a consistent data backup,
-   recreates the services, and verifies the public health endpoint.
-5. If startup, health, or data verification fails, the agent preserves the
-   failed data directory, restores the stopped-app backup, and rebuilds the
-   previously deployed commit. A build failure leaves the running app alone.
-
-The deploy checkout is `/srv/ani-desk/app`, the secret Compose environment
-file is `/srv/ani-desk/config/ani-desk.env`, and state is stored in
-`/srv/ani-desk/state`. The current non-root installation uses this cron entry:
-
-Install all three deployment helpers before enabling the trigger:
+GitHub Actions validates every push and pull request, but it does not connect
+to the homelab and the VM does not poll GitHub. Review the successful CI run,
+then deploy an exact 40-character commit SHA during a maintenance window.
 
 ```sh
-install -m 0755 deploy/homelab/pull-deploy.sh \
-  /srv/ani-desk/deployer/pull-deploy.sh
-install -m 0755 deploy/homelab/run-pull-deploy.sh \
-  /srv/ani-desk/deployer/run-pull-deploy.sh
-install -m 0755 deploy/homelab/data-guard.py \
-  /srv/ani-desk/deployer/data-guard.py
+cd /srv/ani-desk/app
+git fetch origin master
+git checkout --detach REVIEWED_40_CHARACTER_SHA
+
+docker compose --env-file /srv/ani-desk/config/ani-desk.env \
+  -f deploy/homelab/compose.yml build ani-desk
+
+python3 deploy/homelab/data-guard.py snapshot \
+  /srv/ani-desk/data/web.db
+docker compose --env-file /srv/ani-desk/config/ani-desk.env \
+  -f deploy/homelab/compose.yml stop ani-desk
+tar -C /srv/ani-desk -czf \
+  /srv/ani-desk/backups/manual-$(date -u +%Y%m%dT%H%M%SZ).tar.gz data
+docker compose --env-file /srv/ani-desk/config/ani-desk.env \
+  -f deploy/homelab/compose.yml up -d ani-desk caddy
+curl -fsS https://ani.dangphuc.me/api/health
+python3 deploy/homelab/data-guard.py snapshot \
+  /srv/ani-desk/data/web.db
 ```
 
-```cron
-*/3 * * * * /srv/ani-desk/deployer/run-pull-deploy.sh
-```
-
-Install it with `(crontab -l 2>/dev/null; echo '...') | crontab -`, replacing
-the ellipsis with the complete line above. The wrapper rotates its own log and
-the deployer uses `flock`, so overlapping checks cannot rebuild concurrently.
-Check deployment activity with:
-
-```sh
-tail -n 150 /srv/ani-desk/state/deploy.log
-cat /srv/ani-desk/state/deployed.sha
-cat /srv/ani-desk/state/data-before.json
-cat /srv/ani-desk/state/data-after.json
-```
-
-On hosts where an administrator enables the supplied systemd timer, remove the
-cron entry first and use `systemctl status` plus `journalctl` instead.
+The second snapshot must report `integrity: ok`, and protected row counts must
+not decrease. There is deliberately no deployment cron entry or systemd timer.
 
 ## Dockerfile not found
 
@@ -127,12 +106,6 @@ above or build the application image directly with:
 
 ```sh
 docker build --file Dockerfile --tag ani-desk-homelab:test .
-```
-
-To pause automatic deployment without stopping the running application:
-
-```sh
-crontab -l | grep -v '/srv/ani-desk/deployer/run-pull-deploy.sh' | crontab -
 ```
 
 ## Catalog connectivity

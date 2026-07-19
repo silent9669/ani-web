@@ -80,7 +80,7 @@ const fadeUpVariant = {
 
 type Route = "home" | "my-list" | "continue" | "downloads" | "admin" | "search" | "detail" | "catalog" | "settings";
 type AppTheme = "obsidian" | "oled" | "system";
-type AppScale = "compact" | "comfortable" | "large";
+type AppScale = "compact" | "comfortable" | "large" | "tv";
 type AppFont = "manrope" | "noto" | "system";
 type QualityLevel = { index: number; label: string; id?: string };
 type ShelfSort = "recent" | "title" | "provider";
@@ -169,7 +169,77 @@ function App() {
     root.classList.toggle("platform-macos", userAgent.includes("mac"));
     root.classList.toggle("platform-windows", userAgent.includes("win"));
     root.classList.toggle("platform-linux", userAgent.includes("linux"));
+
+    const tvUserAgent = /(smart-tv|smarttv|tizen|web0s|webos|netcast|hbbtv|googletv|android tv|aft[bmst]|crkey)/.test(userAgent);
+    const updateTvPlatform = () => {
+      const remoteViewport = window.matchMedia("(min-width: 80rem) and (min-height: 40rem) and (hover: none)").matches;
+      root.classList.toggle("platform-tv", tvUserAgent || remoteViewport);
+    };
+    updateTvPlatform();
+    window.addEventListener("resize", updateTvPlatform);
+    return () => window.removeEventListener("resize", updateTvPlatform);
   }, []);
+
+  useEffect(() => {
+    const handleTvNavigation = (event: KeyboardEvent) => {
+      if (player || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      const root = document.documentElement;
+      if (!root.classList.contains("platform-tv") && root.dataset.scale !== "tv") return;
+
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (active?.matches("input, textarea, select, [contenteditable='true']")) return;
+
+      const focusable = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+        ),
+      ).filter((element) => {
+        const bounds = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return bounds.width > 0 && bounds.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      });
+      if (!focusable.length) return;
+
+      if (!active || !focusable.includes(active)) {
+        event.preventDefault();
+        const preferred = focusable.find((element) => element.matches(".app-navigation-items > button.active")) ?? focusable[0];
+        preferred.focus({ preventScroll: true });
+        preferred.scrollIntoView({ block: "nearest", inline: "nearest" });
+        return;
+      }
+
+      const current = active.getBoundingClientRect();
+      const currentX = current.left + current.width / 2;
+      const currentY = current.top + current.height / 2;
+      const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+      const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+      let next: HTMLElement | null = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      for (const candidate of focusable) {
+        if (candidate === active) continue;
+        const bounds = candidate.getBoundingClientRect();
+        const deltaX = bounds.left + bounds.width / 2 - currentX;
+        const deltaY = bounds.top + bounds.height / 2 - currentY;
+        const primary = vertical ? deltaY : deltaX;
+        if ((forward && primary <= 4) || (!forward && primary >= -4)) continue;
+        const secondary = vertical ? deltaX : deltaY;
+        const score = Math.abs(primary) + Math.abs(secondary) * 2.4;
+        if (score < bestScore) {
+          next = candidate;
+          bestScore = score;
+        }
+      }
+
+      if (!next) return;
+      event.preventDefault();
+      next.focus({ preventScroll: true });
+      next.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    };
+
+    window.addEventListener("keydown", handleTvNavigation);
+    return () => window.removeEventListener("keydown", handleTvNavigation);
+  }, [player, route]);
 
   useEffect(() => {
     if (route !== "search") return;
@@ -1111,6 +1181,7 @@ function SettingsPage({
     { id: "compact", name: "Compact", description: "More titles and controls on a 16-inch display." },
     { id: "comfortable", name: "Comfortable", description: "Balanced spacing for everyday viewing." },
     { id: "large", name: "Large", description: "Larger text and touch targets for shared screens." },
+    { id: "tv", name: "TV / remote", description: "10-foot text, generous safe margins, and arrow-key focus navigation." },
   ];
   const fonts: Array<{ id: AppFont; name: string; description: string }> = [
     { id: "manrope", name: "Manrope", description: "Modern interface face with Vietnamese support." },
@@ -3897,7 +3968,7 @@ function saveTheme(theme: AppTheme) {
 function loadSavedScale(): AppScale {
   try {
     const saved = localStorage.getItem(APP_SCALE_STORAGE_KEY);
-    if (saved === "compact" || saved === "comfortable" || saved === "large") return saved;
+    if (saved === "compact" || saved === "comfortable" || saved === "large" || saved === "tv") return saved;
   } catch {
     // localStorage can be unavailable in restricted WebView contexts.
   }

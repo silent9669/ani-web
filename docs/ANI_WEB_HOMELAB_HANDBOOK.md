@@ -29,8 +29,8 @@ header-includes:
 
 This is the owner's operating handbook for the hosted web edition of ani-desk,
 named **ani-web** at the repository and deployment level. It covers the service
-from the first local test through deployment, routine monitoring, automatic
-redeployment, rollback, backup, restore, provider certification, and incident
+from the first local test through deployment, routine monitoring, manual
+updates, rollback, backup, restore, provider certification, and incident
 response.
 
 The commands assume:
@@ -79,7 +79,7 @@ The main runtime pieces are:
 | `web.db` | users, roles, sessions, history, My List | yes |
 | `catalog.db` | AniList metadata/cache | yes, but rebuildable |
 | provider adapters | search, episodes, streams, health | external upstream |
-| cron or systemd deploy timer | deploy only a CI-approved commit | state files |
+| manual deployment workflow | reviewed SHA, backup, rebuild, verification | operator runbook |
 | Namecheap DDNS timer | keep the public hostname on the current IP | secret file |
 
 # Quick command card
@@ -459,65 +459,34 @@ curl -fsS https://YOUR_DOMAIN/api/health
 Record the known-good commit in the incident/change log. Do not use `git pull`
 blindly on production; deploy an exact SHA whose CI result you reviewed.
 
-# CI-gated automatic redeployment
+# Manual deployment policy
 
-The pull-deployment agent:
+GitHub Actions is a test gate only. It never connects to the homelab, and the
+homelab has no GitHub polling cron job or deployment timer. After CI succeeds,
+an operator reviews the change and deploys one exact 40-character commit SHA.
 
-1. queries GitHub for the latest completed `CI` push run on `master`;
-2. requires conclusion `success`;
-3. requires the CI commit SHA to equal current `origin/master`;
-4. builds the candidate before interrupting the old app;
-5. stops the app briefly and archives persistent data;
-6. recreates containers and checks the public health endpoint;
-7. records deployed SHA and CI run URL;
-8. preserves failed state and restores the pre-deploy code and data if startup,
-   health, or data checks fail. A candidate build failure never stops the old
-   container.
+The safe order is:
 
-It also compares read-only SQLite integrity and the users, favorites, and
-history row counts before and after recreation. A decrease fails deployment.
+1. record the current SHA and read-only database snapshot;
+2. fetch and inspect the intended commit;
+3. build the candidate while the old container remains online;
+4. stop only the application container;
+5. create and list a consistent archive of `/srv/ani-desk/data`;
+6. recreate the application and Caddy containers;
+7. verify public health, logs, database integrity, and protected row counts;
+8. perform browser acceptance on desktop, mobile, and TV mode.
 
-The verified non-root installation uses cron and the bounded-log wrapper:
-
-```sh
-install -m 0755 deploy/homelab/pull-deploy.sh \
-  /srv/ani-desk/deployer/pull-deploy.sh
-install -m 0755 deploy/homelab/run-pull-deploy.sh \
-  /srv/ani-desk/deployer/run-pull-deploy.sh
-install -m 0755 deploy/homelab/data-guard.py \
-  /srv/ani-desk/deployer/data-guard.py
-(crontab -l 2>/dev/null; printf '%s\n' \
-  '*/3 * * * * /srv/ani-desk/deployer/run-pull-deploy.sh') | crontab -
-```
-
-The core script uses `flock`, so overlapping cron and manual runs exit safely.
-Inspect `/srv/ani-desk/state/deploy.log` for activity.
-
-If administrator access is available, remove that cron line, install the
-reviewed service/timer units, and enable the systemd timer instead:
+Use `deploy/homelab/data-guard.py` before and after the update:
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now ani-desk-deploy.timer
-systemctl list-timers ani-desk-deploy.timer
-sudo systemctl start ani-desk-deploy.service
+python3 deploy/homelab/data-guard.py snapshot \
+  /srv/ani-desk/data/web.db
 ```
 
-Pause cron-driven updates without stopping the app:
-
-```sh
-crontab -l | grep -v '/srv/ani-desk/deployer/run-pull-deploy.sh' | crontab -
-```
-
-Resume cron-driven updates:
-
-```sh
-(crontab -l 2>/dev/null; printf '%s\n' \
-  '*/3 * * * * /srv/ani-desk/deployer/run-pull-deploy.sh') | crontab -
-```
-
-The homelab pulls public GitHub state. GitHub never needs the homelab SSH key,
-and no administrative port should be exposed to the internet.
+The result must report `integrity: ok`. Users, favorites, and history must not
+decrease unless an administrator intentionally removed records. Manual control
+also prevents an unattended upstream/provider outage from coinciding with a
+deployment.
 
 # Backup and restore
 
@@ -698,7 +667,7 @@ docker compose --env-file /srv/ani-desk/config/ani-desk.env \
 | AllAnime verification required | anti-bot challenge | source status | use manual verify workflow |
 | Niniyo title has no episodes | AniMapper mapping absent | metadata provider mapping | use another provider/title |
 | playback resolves but fails | media host/header/expiry | proxy logs, live media probe | refresh source, repair headers |
-| deployment timer does nothing | no successful matching CI SHA | journal and state files | fix branch/repo/CI, rerun timer |
+| manual update runs old code | wrong or abbreviated SHA checked out | `git rev-parse HEAD`, CI run SHA | check out the reviewed 40-character SHA and rebuild |
 | disk fills | backups, Docker layers, logs | `du`, `docker system df` | prune reviewed artifacts safely |
 | rollback still unhealthy | infrastructure/data issue | DNS, disk, Caddy, DB logs | restore only with evidence |
 
@@ -751,18 +720,18 @@ window after confirming the configured credential.
 
 # Maintenance schedule
 
-## Daily or automated
+## Daily
 
 - public health and TLS probe;
 - container restart and host disk alerts;
-- deployment/DDNS timer failure alert;
+- DDNS timer failure alert;
 - one lightweight English and Vietnamese provider smoke check.
 
 ## Weekly
 
-- review application, Caddy, deployment, and DDNS errors;
+- review application, Caddy, manual deployment, and DDNS errors;
 - inspect disk growth and backup creation;
-- confirm the deployed SHA is CI-approved;
+- compare the deployed SHA with the reviewed successful CI run;
 - review dependency and base-image security alerts.
 
 ## Monthly
@@ -793,7 +762,7 @@ Before pushing to `silent9669/ani-web`:
 - [ ] Compose configuration validates using a protected/local env file;
 - [ ] English and Vietnamese provider certification results are recorded;
 - [ ] Niniyo live tests retrieve real HLS media;
-- [ ] desktop and mobile browser flows pass;
+- [ ] desktop, mobile, and TV/remote browser flows pass;
 - [ ] CI targets `master`.
 
 Before production recreation:
@@ -809,7 +778,7 @@ Before production recreation:
 
 - `deploy/homelab/README.md` -- concise deployment notes;
 - `deploy/homelab/compose.yml` -- Caddy and application services;
-- `deploy/homelab/pull-deploy.sh` -- CI-gated update and rollback;
+- `deploy/homelab/data-guard.py` -- read-only database preservation check;
 - `deploy/homelab/bootstrap-host.sh` -- host preparation;
 - `context/06-deploy-operate-monitor.md` -- canonical runbook context;
 - `context/04-api-data-provider-contracts.md` -- API/provider rules;

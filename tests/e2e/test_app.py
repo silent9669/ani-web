@@ -99,6 +99,51 @@ def test_t1_dashboard_shelves_hide_scrollbars(mocked_page):
     scroll = mocked_page.evaluate("() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight")
     assert scroll is True
 
+def test_t1_tv_mode_has_safe_layout_and_large_targets(mocked_page):
+    mocked_page.set_viewport_size({"width": 1920, "height": 1080})
+    mocked_page.evaluate("() => localStorage.setItem('ani-desk:scale', 'tv')")
+    mocked_page.reload()
+    expect(mocked_page.locator(".home-command-center")).to_be_visible()
+
+    metrics = mocked_page.evaluate("""() => {
+        const navigation = document.querySelector('.app-navigation').getBoundingClientRect();
+        const stage = document.querySelector('.home-command-center').getBoundingClientRect();
+        const navButton = document.querySelector('.app-navigation-items > button').getBoundingClientRect();
+        return {
+            scale: document.documentElement.dataset.scale,
+            fontSize: parseFloat(getComputedStyle(document.documentElement).fontSize),
+            pageWidth: document.documentElement.scrollWidth,
+            viewportWidth: window.innerWidth,
+            navigationRight: navigation.right,
+            stageLeft: stage.left,
+            navTargetHeight: navButton.height,
+        };
+    }""")
+
+    assert metrics["scale"] == "tv"
+    assert metrics["fontSize"] >= 20
+    assert metrics["pageWidth"] <= metrics["viewportWidth"]
+    assert metrics["stageLeft"] >= metrics["navigationRight"] + 16
+    assert metrics["navTargetHeight"] >= 80
+
+def test_t1_tv_remote_arrows_move_visible_focus(mocked_page):
+    mocked_page.set_viewport_size({"width": 1920, "height": 1080})
+    mocked_page.evaluate("() => localStorage.setItem('ani-desk:scale', 'tv')")
+    mocked_page.reload()
+    mocked_page.evaluate("() => document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+
+    mocked_page.keyboard.press("ArrowRight")
+    first_focus = mocked_page.evaluate("() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim()")
+    assert first_focus == "Home"
+
+    mocked_page.keyboard.press("ArrowDown")
+    second_focus = mocked_page.evaluate("""() => ({
+        label: document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim(),
+        outline: getComputedStyle(document.activeElement).outlineStyle,
+    })""")
+    assert second_focus["label"] == "Search"
+    assert second_focus["outline"] != "none"
+
 def test_t1_dashboard_my_list_nav(mocked_page):
     mocked_page.set_viewport_size({"width": 1440, "height": 900})
     shelf = mocked_page.locator(".content-row:has-text('Top Matches')")

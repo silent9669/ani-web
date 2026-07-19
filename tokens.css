@@ -87,6 +87,7 @@
 :root[data-scale="compact"] { font-size: 15px; }
 :root[data-scale="comfortable"] { font-size: 16px; }
 :root[data-scale="large"] { font-size: 18px; }
+:root[data-scale="tv"] { font-size: 20px; }
 
 :root[data-theme="oled"] {
   --color-paper: oklch(5% 0.010 28);

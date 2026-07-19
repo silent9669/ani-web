@@ -104,3 +104,23 @@ cargo run --example provider_certification -- --require-english
 
 The certification example prints media hosts rather than full signed URLs so
 tokens do not enter normal logs.
+
+## 2026-07-19 additional-provider review
+
+No additional provider was enabled in this review. Each candidate was tested
+through stream resolution rather than admitted on search results alone:
+
+| Candidate | Search/episodes | Playback result | Decision |
+| --- | --- | --- | --- |
+| AnimeVietSub through AniMapper | mapping and 1,193 One Piece entries returned | source calls timed out for old and recent episodes across server options | keep disabled |
+| NeoAnime / Miruro API v2 | search returned current AniList metadata | documented `/episodes/{id}` route returned HTTP 403 because its upstream pipe failed | keep disabled |
+| AnimePahe public wrappers | documentation advertises direct HLS | tested endpoints timed out, required anti-bot cookies, or required a private API key | do not add a new secret dependency |
+| Vidzen provider suite | provider routes are documented | every tested provider route returned HTTP 401 without an API key | exclude from the private homelab build |
+| NguonC | candidate API/domain identified | HTTPS connection failed from the development host | keep disabled |
+
+HiAnime remains a non-certified stub. Its current third-party implementations
+depend on scraping and rapidly changing upstream tokens, so it is not exposed
+until the native adapter can independently pass search, episode, source, and
+media-byte checks. The enabled matrix therefore remains three English sources
+(AllAnime, MovieBox, AnimeGG) and three Vietnamese sources (KKPhim, OPhim,
+Niniyo).
