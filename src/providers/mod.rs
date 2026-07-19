@@ -4,6 +4,7 @@ pub mod animevietsub;
 pub mod hianime;
 pub mod kkphim;
 pub mod moviebox;
+pub mod niniyo;
 pub mod ophim;
 
 use crate::config::Config;
@@ -130,17 +131,16 @@ impl ProviderRegistry {
             providers.push(Arc::new(allanime::AllAnimeProvider::new()));
         }
 
-        if config.sources.animegg {
-            providers.push(Arc::new(animegg::AnimeGgProvider::new()));
-        }
-
         if config.sources.moviebox {
             providers.push(Arc::new(moviebox::MovieBoxProvider::new()));
         }
 
-        if config.sources.hianime {
-            providers.push(Arc::new(hianime::HiAnimeProvider::new()));
+        if config.sources.animegg {
+            providers.push(Arc::new(animegg::AnimeGgProvider::new()));
         }
+
+        // HiAnime remains a parseable legacy adapter, but is not registered
+        // until it passes live playback certification.
 
         // --- Vietnamese Sources ---
         // 2. KKPhim
@@ -151,6 +151,10 @@ impl ProviderRegistry {
         // 3. OPhim
         if config.sources.ophim {
             providers.push(Arc::new(ophim::OphimProvider::new()));
+        }
+
+        if config.sources.niniyo {
+            providers.push(Arc::new(niniyo::NiniyoProvider::new()));
         }
 
         Self { providers }
@@ -219,9 +223,11 @@ mod tests {
     }
 
     #[test]
-    fn registry_includes_certified_sources_and_omits_retired_duplicates() {
+    fn registry_includes_certified_sources_and_omits_duplicates() {
         let mut config = Config::default();
         config.sources.moviebox = true;
+        config.sources.animegg = true;
+        config.sources.hianime = true;
         config.sources.animevietsub = true;
         config.sources.animetvn = true;
         config.sources.niniyo = true;
@@ -233,8 +239,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"MovieBox"));
+        assert!(names.contains(&"AnimeGG"));
+        assert!(!names.contains(&"HiAnime"));
         assert!(!names.contains(&"AnimeVietSub"));
         assert!(!names.contains(&"AnimeTVN"));
-        assert!(!names.contains(&"Niniyo"));
+        assert!(names.contains(&"Niniyo"));
     }
 }

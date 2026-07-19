@@ -32,11 +32,9 @@ data/
 .env
 .env.*
 !.env.example
-!.env.homelab.example
 
 # Development/Agent files
 __pycache__/
-.hallmark/
 .agent/
 .agents/
 .githooks/
@@ -46,6 +44,10 @@ __pycache__/
 .venv-e2e/
 .playwright-browsers/
 .pytest_cache/
+.hallmark/concepts/
+.hallmark/qa/
+.hallmark/log.json
+.hallmark/preflight.json
 AGENTS.md
 
 daytona

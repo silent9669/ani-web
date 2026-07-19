@@ -11,7 +11,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const API_BASE: &str = "https://api6.aoneroom.com";
+const API_BASES: [&str; 3] = [
+    "https://api4.aoneroom.com",
+    "https://api5.aoneroom.com",
+    "https://api6.aoneroom.com",
+];
 const SECRET: &str = "NzZpUmwwN3MweFNOOWpxbUVXQXQ3OUVCSlp1bElRSXNWNjRGWnIyTw==";
 const MOBILE_USER_AGENT: &str = "com.community.oneroom/50020052 (Linux; U; Android 16; en_IN; sdk_gphone64_x86_64; Build/BP22.250325.006; Cronet/133.0.6876.3)";
 const PLAYBACK_USER_AGENT: &str =
@@ -29,7 +33,7 @@ struct MovieBoxEpisode {
 
 pub struct MovieBoxProvider {
     client: reqwest::Client,
-    token: tokio::sync::Mutex<Option<String>>,
+    tokens: tokio::sync::Mutex<HashMap<String, String>>,
 }
 
 impl Default for MovieBoxProvider {
@@ -45,17 +49,16 @@ impl MovieBoxProvider {
                 .timeout(Duration::from_secs(20))
                 .build()
                 .expect("failed to build MovieBox client"),
-            token: tokio::sync::Mutex::new(None),
+            tokens: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
-    async fn get_token(&self) -> Result<String> {
-        let mut lock = self.token.lock().await;
-        if let Some(token) = lock.as_ref() {
-            return Ok(token.clone());
+    async fn get_token(&self, api_base: &str) -> Result<String> {
+        if let Some(token) = self.tokens.lock().await.get(api_base).cloned() {
+            return Ok(token);
         }
 
-        let url = Url::parse(API_BASE)?
+        let url = Url::parse(api_base)?
             .join("/wefeed-mobile-bff/tab-operating?page=1&tabId=0&version=")?;
         let headers = signed_headers(&Method::GET, &url, None, None, None)?;
         let response = self
@@ -86,7 +89,10 @@ impl MovieBoxProvider {
             .context("MovieBox auth x-user header missing token")?
             .to_string();
 
-        *lock = Some(token.clone());
+        self.tokens
+            .lock()
+            .await
+            .insert(api_base.to_string(), token.clone());
         Ok(token)
     }
 
@@ -97,19 +103,46 @@ impl MovieBoxProvider {
         body: Option<Value>,
         play_mode: Option<&str>,
     ) -> Result<Value> {
-        let url = Url::parse(API_BASE)?.join(path)?;
         let body_text = body
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
             .context("failed to encode MovieBox request")?;
-        let token = self.get_token().await?;
-        let headers = signed_headers(&method, &url, body_text.as_deref(), play_mode, Some(&token))?;
-        let mut request = self.client.request(method, url).headers(headers);
-        if let Some(body_text) = body_text {
-            request = request.body(body_text);
+        let mut failures = Vec::new();
+        for api_base in API_BASES {
+            match self
+                .request_json_at(api_base, &method, path, body_text.as_deref(), play_mode)
+                .await
+            {
+                Ok(value) => return Ok(value),
+                Err(error) => failures.push(format!("{api_base}: {error:#}")),
+            }
         }
-        let response = request.send().await.context("MovieBox request failed")?;
+        anyhow::bail!(
+            "PROVIDER_UNAVAILABLE: every MovieBox API host failed: {}",
+            failures.join("; ")
+        )
+    }
+
+    async fn request_json_at(
+        &self,
+        api_base: &str,
+        method: &Method,
+        path: &str,
+        body_text: Option<&str>,
+        play_mode: Option<&str>,
+    ) -> Result<Value> {
+        let url = Url::parse(api_base)?.join(path)?;
+        let token = self.get_token(api_base).await?;
+        let headers = signed_headers(method, &url, body_text, play_mode, Some(&token))?;
+        let mut request = self.client.request(method.clone(), url).headers(headers);
+        if let Some(body_text) = body_text {
+            request = request.body(body_text.to_string());
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("MovieBox request failed through {api_base}"))?;
         let status = response.status();
         let text = response
             .text()
@@ -620,11 +653,5 @@ mod tests {
         let results = MovieBoxProvider::parse_search_items(&value);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "42");
-    }
-
-    #[tokio::test]
-    #[ignore = "live provider certification; run explicitly when reconsidering MovieBox"]
-    async fn live_moviebox_health_smoke() {
-        MovieBoxProvider::new().health_check().await.unwrap();
     }
 }

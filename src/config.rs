@@ -38,7 +38,7 @@ pub struct SourcesConfig {
     #[serde(default)]
     pub animetvn: bool,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub niniyo: bool,
 
     #[serde(default)]
@@ -78,7 +78,7 @@ impl Default for SourcesConfig {
             ophim: true,
             animevietsub: false,
             animetvn: false,
-            niniyo: false,
+            niniyo: true,
             hianime: false,
         }
     }

@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_SLUG="${ANI_DESK_REPO_SLUG:-silent9669/ani-desk}"
-REPO_URL="${ANI_DESK_REPO_URL:-https://github.com/silent9669/ani-desk.git}"
+REPO_SLUG="${ANI_DESK_REPO_SLUG:-silent9669/ani-web}"
+REPO_URL="${ANI_DESK_REPO_URL:-https://github.com/silent9669/ani-web.git}"
 BRANCH="${ANI_DESK_DEPLOY_BRANCH:-master}"
 WORKFLOW="${ANI_DESK_CI_WORKFLOW:-ci.yml}"
-SOURCE_DIR="${ANI_DESK_SOURCE_DIR:-/srv/ani-desk/source}"
+SOURCE_DIR="${ANI_DESK_SOURCE_DIR:-/srv/ani-desk/app}"
 CONFIG_FILE="${ANI_DESK_CONFIG_FILE:-/srv/ani-desk/config/ani-desk.env}"
 STATE_DIR="${ANI_DESK_STATE_DIR:-/srv/ani-desk/state}"
 DATA_DIR="${ANI_DESK_DATA_DIR_HOST:-/srv/ani-desk/data}"
 BACKUP_DIR="${ANI_DESK_BACKUP_DIR:-/srv/ani-desk/backups}"
 HEALTH_URL="${ANI_DESK_HEALTH_URL:-https://ani.dangphuc.me/api/health}"
 COMPOSE_PROJECT="${ANI_DESK_COMPOSE_PROJECT:-homelab}"
+DATA_GUARD="${ANI_DESK_DATA_GUARD:-/srv/ani-desk/deployer/data-guard.py}"
 
 log() {
   printf '%s ani-desk-deploy: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -24,7 +25,7 @@ require_command() {
   }
 }
 
-for command in curl docker git jq tar; do
+for command in curl docker flock git jq python3 tar; do
   require_command "$command"
 done
 
@@ -33,7 +34,26 @@ done
   exit 1
 }
 
+[[ -r "$DATA_GUARD" ]] || {
+  log "database guard is not readable: $DATA_GUARD"
+  exit 1
+}
+
 mkdir -p "$(dirname "$SOURCE_DIR")" "$STATE_DIR" "$BACKUP_DIR"
+
+exec 9>"$STATE_DIR/deploy.lock"
+if ! flock -n 9; then
+  log "another deployment check is already running"
+  exit 0
+fi
+
+database_snapshot() {
+  python3 "$DATA_GUARD" snapshot "$DATA_DIR/web.db"
+}
+
+verify_database_snapshot() {
+  python3 "$DATA_GUARD" verify "$1" "$2"
+}
 
 api_url="https://api.github.com/repos/${REPO_SLUG}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&event=push&status=completed&per_page=1"
 run_json="$(curl --fail --silent --show-error --location \
@@ -102,12 +122,21 @@ wait_for_health() {
 }
 
 deployment_started=0
+backup_path=""
+failed_data_path=""
 rollback() {
   local failed_status="$?"
   trap - ERR
   if [[ "$deployment_started" == "1" && "$previous_sha" =~ ^[0-9a-f]{40}$ ]] && \
      git -C "$SOURCE_DIR" cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
     log "deployment failed; rolling back to $previous_sha"
+    compose stop ani-desk || true
+    if [[ -n "$backup_path" && -f "$backup_path" && -d "$DATA_DIR" ]]; then
+      failed_data_path="$BACKUP_DIR/failed-data-$(date -u +%Y%m%dT%H%M%SZ)"
+      log "preserving failed data at $failed_data_path and restoring pre-deploy backup"
+      mv "$DATA_DIR" "$failed_data_path"
+      tar -C "$(dirname "$DATA_DIR")" -xzf "$backup_path"
+    fi
     git -C "$SOURCE_DIR" checkout --quiet --detach "$previous_sha"
     compose build ani-desk
     compose up -d ani-desk caddy
@@ -128,13 +157,23 @@ compose build ani-desk
 
 deployment_started=1
 compose stop ani-desk
+before_snapshot="$(database_snapshot)"
+if [[ "$(jq -r '.integrity // "ok"' <<<"$before_snapshot")" != "ok" ]]; then
+  log "database integrity check failed before deployment"
+  false
+fi
 backup_name="data-${approved_sha:0:12}-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
 if [[ -d "$DATA_DIR" ]]; then
-  log "backing up stopped application data to $BACKUP_DIR/$backup_name"
-  tar -C "$(dirname "$DATA_DIR")" -czf "$BACKUP_DIR/$backup_name" "$(basename "$DATA_DIR")"
+  backup_path="$BACKUP_DIR/$backup_name"
+  log "backing up stopped application data to $backup_path"
+  tar -C "$(dirname "$DATA_DIR")" -czf "$backup_path" "$(basename "$DATA_DIR")"
 fi
 compose up -d ani-desk caddy
 wait_for_health
+after_snapshot="$(database_snapshot)"
+verify_database_snapshot "$before_snapshot" "$after_snapshot"
+printf '%s\n' "$before_snapshot" >"$STATE_DIR/data-before.json"
+printf '%s\n' "$after_snapshot" >"$STATE_DIR/data-after.json"
 
 printf '%s\n' "$approved_sha" >"$STATE_DIR/deployed.sha"
 printf '%s\n' "$run_url" >"$STATE_DIR/approved-run.url"

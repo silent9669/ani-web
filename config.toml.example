@@ -8,7 +8,7 @@
 # Enable AllAnime source (English)
 allanime = true
 
-# Direct English hard-sub streams, including anime films.
+# Live-certified English source.
 animegg = true
 
 # Signed English-sub series and film streams.
@@ -20,15 +20,17 @@ kkphim = true
 # Enable OPhim source (Vietnamese)
 ophim = true
 
-# Enable AnimeVietSub through the AniMapper streaming API (Vietnamese)
-animevietsub = true
+# Legacy duplicate of OPhim. Keep disabled unless testing migration behavior.
+animevietsub = false
 
-# Additional documented AniMapper Vietnamese providers. Runtime health checks
-# disable them automatically when mapping or playback is unavailable.
+# Additional documented AniMapper Vietnamese providers. AnimeTVN is not yet
+# certified for direct playback. Niniyo is certified through AniMapper's
+# mapped episode and HLS source APIs.
 animetvn = false
-niniyo = false
+niniyo = true
 
-# Experimental English source. Disabled until direct playback certification passes.
+# Legacy experimental setting retained for compatibility. The runtime ignores
+# it until a maintained upstream passes direct playback certification.
 hianime = false
 
 [theme]

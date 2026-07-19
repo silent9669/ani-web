@@ -9,6 +9,8 @@ import {
   Clock,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   Film,
   FolderOpen,
   HardDrive,
@@ -84,7 +86,7 @@ type QualityLevel = { index: number; label: string; id?: string };
 type ShelfSort = "recent" | "title" | "provider";
 type HomeFeatureSlide = {
   id: string;
-  kind: "trending";
+  kind: "personalMatch";
   title: string;
   image: string;
   description: string;
@@ -457,8 +459,17 @@ function App() {
   }
 
   async function searchProviderResults(queryText: string, source: Source) {
-    if (source.status === "unavailable" || !source.capabilities.search) return [];
+    if (!source.capabilities.search) return [];
     const items = await api.searchSource(source.name, queryText);
+
+    // Health checks are snapshots. A provider may recover between the health
+    // probe and an explicit user search, so a successful search is stronger
+    // evidence than a stale unavailable badge.
+    if (source.status === "unavailable" || source.status === "unknown") {
+      const recovered = { ...source, status: "healthy", failureCode: null };
+      setSources((current) => current.map((item) => item.name === source.name ? recovered : item));
+      setSelectedSource((current) => current?.name === source.name ? recovered : current);
+    }
 
     const seen = new Set<string>();
     return items
@@ -898,6 +909,7 @@ function App() {
               onOpen={(item) => void openHistoryItem(item)}
               onRemove={(item) => void removeHistoryItem(item)}
               onBack={goBack}
+              onOpenSearch={openSearch}
               myList={myList}
               onToggleFavorite={(item) => toggleMyList(historyToAnime(item, myList))}
             />
@@ -910,6 +922,7 @@ function App() {
               onOpen={(anime) => void openAnime(anime)}
               onRemove={(anime) => void removeFromMyList(anime)}
               onBack={goBack}
+              onOpenSearch={openSearch}
             />
           )}
 
@@ -1181,6 +1194,7 @@ function LoginScreen({
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   return (
@@ -1229,11 +1243,32 @@ function LoginScreen({
             <span>Username</span>
             <input autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
           </label>
-          <label>
+          <label className="login-password-label">
             <span>Password</span>
-            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <span className="login-password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                className="login-password-toggle"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </span>
           </label>
-          {error && <p className="login-error"><AlertTriangle size={16} /> {error}</p>}
+          {error && (
+            <div className="login-error" role="alert">
+              <AlertTriangle size={16} />
+              <span>{error}<small>Safari may reuse an older saved password. Reveal the field and verify it before retrying.</small></span>
+            </div>
+          )}
           <button className="primary" disabled={submitting || !username.trim() || !password}>
             {submitting ? <Loader2 className="spin" size={18} /> : <ChevronRight size={18} />}
             {submitting ? "Signing in…" : "Sign in"}
@@ -1415,27 +1450,37 @@ function HomeDashboard({
   const [featurePaused, setFeaturePaused] = useState(false);
   const [featureInteracting, setFeatureInteracting] = useState(false);
   const [documentVisible, setDocumentVisible] = useState(!document.hidden);
+  const personalMatches = useMemo(() => {
+    const candidates = [...(discovery?.trending ?? []), ...(discovery?.popularThisSeason ?? [])];
+    const uniqueCandidates = [...new Map(candidates.map((item) => [item.catalogId, item])).values()];
+    return sortCatalogByPersonalMatch(uniqueCandidates);
+  }, [discovery?.trending, discovery?.popularThisSeason]);
   const featureSlides = useMemo<HomeFeatureSlide[]>(() => [
-    ...(discovery?.trending ?? []).slice(0, 10).map((item) => ({
-      id: `trending:${item.catalogId}`,
-      kind: "trending" as const,
+    ...personalMatches.slice(0, 10).map((item) => ({
+      id: `personal-match:${item.catalogId}`,
+      kind: "personalMatch" as const,
       title: item.title,
       image: item.bannerUrl || item.coverUrl || LOGO_SRC,
       description: plainDescription(item.description) || "Open the title, choose a provider, and see the episodes available to your family.",
-      context: "Trending on AniList",
+      context: item.personalMatch != null ? `${item.personalMatch}% personal match` : "Recommended for you",
       progress: 0,
       catalog: item,
     })),
-  ], [discovery?.trending]);
+  ], [personalMatches]);
   const featured = featureSlides[featureIndex] ?? featureSlides[0] ?? {
     id: "ani-desk",
-    kind: "trending" as const,
+    kind: "personalMatch" as const,
     title: "ani-desk",
     image: LOGO_SRC,
     description: "Choose one provider catalog, find an episode, and settle in.",
     context: "Private family theatre",
     progress: 0,
   };
+  const featuredTitleClass = featured.title.length > 72
+    ? "very-long"
+    : featured.title.length > 38
+      ? "long"
+      : undefined;
 
   useEffect(() => {
     setFeatureIndex((current) => Math.min(current, Math.max(0, featureSlides.length - 1)));
@@ -1451,7 +1496,7 @@ function HomeDashboard({
     if (shouldReduceMotion || featurePaused || featureInteracting || !documentVisible || featureSlides.length < 2) return undefined;
     const interval = window.setInterval(() => {
       setFeatureIndex((current) => (current + 1) % featureSlides.length);
-    }, 6500);
+    }, 4200);
     return () => window.clearInterval(interval);
   }, [shouldReduceMotion, featurePaused, featureInteracting, documentVisible, featureSlides.length]);
 
@@ -1494,7 +1539,7 @@ function HomeDashboard({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: shouldReduceMotion ? 0.15 : 0.42, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: shouldReduceMotion ? 0.15 : 0.34, ease: [0.16, 1, 0.3, 1] }}
             aria-hidden="true"
           />
         </AnimatePresence>
@@ -1506,10 +1551,10 @@ function HomeDashboard({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: shouldReduceMotion ? 0.15 : 0.28 }}
+            transition={{ duration: shouldReduceMotion ? 0.15 : 0.22 }}
           >
             <p className="home-feature-context">{featured.context}</p>
-            <h1>{featured.title}</h1>
+            <h1 className={featuredTitleClass}>{featured.title}</h1>
             <p className="home-feature-description">{featured.description}</p>
             <div className="home-feature-actions">
               {featured.catalog ? (
@@ -1573,8 +1618,8 @@ function HomeDashboard({
           onRemove={onRemoveHistory}
         />
         <CatalogRow
-          title="Trending Now"
-          items={discovery?.trending ?? []}
+          title="Top Matches"
+          items={personalMatches}
           loading={!discovery}
           onOpen={onOpenCatalog}
           onShowMore={onShowCatalog}
@@ -1656,6 +1701,7 @@ function ProviderChips({
         <button
           key={source.name}
           className={selected?.name === source.name ? "provider-chip active" : "provider-chip"}
+          aria-pressed={selected?.name === source.name}
           onClick={() => onSelect(source)}
         >
           <strong>{source.name}</strong>
@@ -1799,9 +1845,7 @@ function CatalogPage({
   const networkSort = sort === "personalMatch" ? "trending" : sort;
   const visibleItems = useMemo(() => {
     if (sort !== "personalMatch") return items;
-    return [...items].sort((left, right) =>
-      (right.personalMatch ?? right.score ?? 0) - (left.personalMatch ?? left.score ?? 0),
-    );
+    return sortCatalogByPersonalMatch(items);
   }, [items, sort]);
 
   useEffect(() => {
@@ -1828,7 +1872,7 @@ function CatalogPage({
     <motion.section className="catalog-browser" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
       <header className="catalog-browser-header">
         <IconButton label="Back" onClick={onBack}><ArrowLeft size={21} /></IconButton>
-        <div><span>AniList discovery</span><h1>Trending catalog</h1><p>Refine the live catalog, then rank this page locally for your taste.</p></div>
+        <div><span>Ranked for you</span><h1>Personalized catalog</h1><p>Your strongest personal matches appear first. Refine the catalog or choose another order at any time.</p></div>
       </header>
       <div className="catalog-filter-bar">
         <label className="catalog-sort-control"><span>Order</span><select value={sort} onChange={(event) => { setPage(1); setSort(event.target.value); }} aria-label="Sort catalog">
@@ -1997,6 +2041,8 @@ function SearchStage({
             <Search size={20} />
             <input
               ref={inputRef}
+              type="search"
+              aria-label="Search anime, films, and OVAs"
               value={query}
               placeholder="Search anime, films, OVAs..."
               onChange={(event) => onQueryChange(event.target.value)}
@@ -2009,8 +2055,8 @@ function SearchStage({
         </div>
         <div className="search-source-row">
           <div className="language-switch" aria-label="Subtitle language">
-            <button className={languageGroup === "english" ? "active" : ""} onClick={() => onLanguageChange("english")}>English</button>
-            <button className={languageGroup === "vietnamese" ? "active" : ""} onClick={() => onLanguageChange("vietnamese")}>Vietnamese</button>
+            <button aria-pressed={languageGroup === "english"} className={languageGroup === "english" ? "active" : ""} onClick={() => onLanguageChange("english")}>English</button>
+            <button aria-pressed={languageGroup === "vietnamese"} className={languageGroup === "vietnamese" ? "active" : ""} onClick={() => onLanguageChange("vietnamese")}>Vietnamese</button>
           </div>
           <div className="availability-strip" aria-label="Available providers">
             {languageSources.map((source) => {
@@ -2019,17 +2065,24 @@ function SearchStage({
               const recoverable = Boolean(source.verificationUrl || source.websiteUrl);
               const enabled = source.capabilities.search && (source.status !== "unavailable" || recoverable);
               const isActive = selectedSource?.name === source.name || selectedAnime?.provider === source.name;
+              const actionLabel = source.status === "unavailable" && source.verificationUrl
+                ? "Verify / Xác minh"
+                : enabled
+                  ? (hasDirectResult ? "Results" : "Search")
+                  : "Unavailable";
               return (
                 <button
                   key={source.name}
                   className={isActive ? "provider-chip active" : "provider-chip"}
+                  aria-label={`${source.name}: ${actionLabel}`}
+                  aria-pressed={isActive}
                   disabled={!enabled}
                   title={source.failureCode || option?.failureCode || undefined}
                   onClick={() => onProviderSourceSelect(source)}
                 >
                   <i className={`health-dot ${source.status}`} />
                   <strong>{source.name}</strong>
-                  <span>{source.status === "unavailable" && source.verificationUrl ? "Verify / Xác minh" : enabled ? (hasDirectResult ? "Results" : "Search") : "Unavailable"}</span>
+                  <span>{actionLabel}</span>
                 </button>
               );
             })}
@@ -2225,6 +2278,7 @@ function HistoryPage({
   onOpen,
   onRemove,
   onBack,
+  onOpenSearch,
   myList,
   onToggleFavorite,
 }: {
@@ -2232,6 +2286,7 @@ function HistoryPage({
   onOpen: (item: WatchHistory) => void;
   onRemove: (item: WatchHistory) => void;
   onBack: () => void;
+  onOpenSearch: () => void;
   myList: Favorite[];
   onToggleFavorite: (item: WatchHistory) => void;
 }) {
@@ -2257,6 +2312,9 @@ function HistoryPage({
       filter={filter}
       sort={sort}
       empty="Nothing to resume yet."
+      emptyDescription="Start an episode and your progress will appear here on every signed-in device."
+      emptyActionLabel="Find something to watch"
+      onEmptyAction={onOpenSearch}
       onBack={onBack}
       onFilterChange={setFilter}
       onSortChange={setSort}
@@ -2282,11 +2340,13 @@ function MyListPage({
   onOpen,
   onRemove,
   onBack,
+  onOpenSearch,
 }: {
   items: Anime[];
   onOpen: (anime: Anime) => void;
   onRemove: (anime: Anime) => void;
   onBack: () => void;
+  onOpenSearch: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<ShelfSort>("recent");
@@ -2309,7 +2369,10 @@ function MyListPage({
       count={items.length}
       filter={filter}
       sort={sort}
-      empty="Your My List is empty."
+      empty="Your list is ready for its first title"
+      emptyDescription="Search any provider, open a title, and add it here for quick access later."
+      emptyActionLabel="Search providers"
+      onEmptyAction={onOpenSearch}
       onBack={onBack}
       onFilterChange={setFilter}
       onSortChange={setSort}
@@ -2554,6 +2617,23 @@ function AdminUserRow({
   const [deleting, setDeleting] = useState(false);
   const dirty = username.trim() !== user.username || role !== user.role || password.length > 0;
 
+  if (user.protected) {
+    return (
+      <article className="admin-user-row protected admin-user-protected">
+        <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
+        <div className="admin-protected-identity">
+          <strong>{user.username}</strong>
+          <small>{isCurrent ? "Current session" : "Protected administrator"}</small>
+        </div>
+        <div className="admin-protected-badges" aria-label="Account status">
+          <span><ShieldCheck size={15} /> Protected</span>
+          <span>{user.enabled ? "Active" : "Disabled"}</span>
+        </div>
+        <p>Managed by the private server environment. Favorites and watch history stay attached to this account in the mounted SQLite database.</p>
+      </article>
+    );
+  }
+
   return (
     <article className={`admin-user-row${user.enabled ? "" : " disabled"}${user.protected ? " protected" : ""}`}>
       <div className="admin-user-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
@@ -2604,6 +2684,9 @@ function ShelfPageShell({
   filter,
   sort,
   empty,
+  emptyDescription,
+  emptyActionLabel,
+  onEmptyAction,
   onBack,
   onFilterChange,
   onSortChange,
@@ -2615,6 +2698,9 @@ function ShelfPageShell({
   filter: string;
   sort: ShelfSort;
   empty: string;
+  emptyDescription: string;
+  emptyActionLabel: string;
+  onEmptyAction: () => void;
   onBack: () => void;
   onFilterChange: (filter: string) => void;
   onSortChange: (sort: ShelfSort) => void;
@@ -2645,7 +2731,16 @@ function ShelfPageShell({
         </select>
       </div>
 
-      {count ? <div className="poster-grid">{children}</div> : <p className="empty-state">{empty}</p>}
+      {count ? (
+        <div className="poster-grid">{children}</div>
+      ) : (
+        <section className="shelf-empty-state" aria-labelledby="shelf-empty-title">
+          <div className="shelf-empty-icon" aria-hidden="true"><Search size={24} /></div>
+          <h2 id="shelf-empty-title">{empty}</h2>
+          <p>{emptyDescription}</p>
+          <button className="primary" onClick={onEmptyAction}><Search size={17} />{emptyActionLabel}</button>
+        </section>
+      )}
     </motion.section>
   );
 }
@@ -2924,6 +3019,9 @@ function DetailPage({
 
           <section className="episode-panel episode-list-panel">
             <div className="episode-heading">
+              <IconButton label="Back" className="mobile-detail-back" onClick={onBack}>
+                <ArrowLeft size={21} />
+              </IconButton>
               <div>
                 <h3>Episodes</h3>
                 <span>Range {activeRangeLabel} / {episodes.length} total</span>
@@ -2961,8 +3059,10 @@ function DetailPage({
               <label>
                 <Search size={17} />
                 <input
+                  type="search"
+                  aria-label="Find episode by number or title"
                   value={episodeQuery}
-                  placeholder="Find episode by number or title"
+                  placeholder="Episode number or title"
                   onChange={(event) => setEpisodeQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" || !/^\d+$/.test(episodeQuery.trim())) return;
@@ -2974,8 +3074,8 @@ function DetailPage({
                 />
               </label>
               <div className="episode-sort">
-                <button className={!latestFirst ? "active" : ""} onClick={() => setLatestFirst(false)}>First</button>
-                <button className={latestFirst ? "active" : ""} onClick={() => setLatestFirst(true)}>Latest</button>
+                <button aria-pressed={!latestFirst} className={!latestFirst ? "active" : ""} onClick={() => setLatestFirst(false)}>First</button>
+                <button aria-pressed={latestFirst} className={latestFirst ? "active" : ""} onClick={() => setLatestFirst(true)}>Latest</button>
               </div>
             </div>
             <div className="episode-list-shell">
@@ -3718,6 +3818,16 @@ function plainDescription(value?: string | null): string {
     .replace(/<[^>]+>/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function sortCatalogByPersonalMatch(items: CatalogAnime[]): CatalogAnime[] {
+  return [...items].sort((left, right) => {
+    const matchDifference = (right.personalMatch ?? right.score ?? 0) - (left.personalMatch ?? left.score ?? 0);
+    if (matchDifference !== 0) return matchDifference;
+    const scoreDifference = (right.score ?? 0) - (left.score ?? 0);
+    if (scoreDifference !== 0) return scoreDifference;
+    return left.title.localeCompare(right.title);
+  });
 }
 
 function detailPatch(details: AnimeDetails): Partial<Anime> {

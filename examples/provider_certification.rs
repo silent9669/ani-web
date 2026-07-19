@@ -7,10 +7,8 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<()> {
     let require_english = std::env::args().any(|argument| argument == "--require-english");
-    let require_vietnamese = std::env::args().any(|argument| argument == "--require-vietnamese");
     let registry = ProviderRegistry::new(&Config::default());
     let mut healthy_english = 0usize;
-    let mut healthy_vietnamese = 0usize;
     let mut failures = Vec::new();
 
     for provider in registry.list_providers() {
@@ -23,8 +21,6 @@ async fn main() -> Result<()> {
                 println!("PASS {} ({})", provider.name(), provider.language());
                 if provider.language() == Language::English {
                     healthy_english += 1;
-                } else if provider.language() == Language::Vietnamese {
-                    healthy_vietnamese += 1;
                 }
             }
             Err(error) => {
@@ -40,9 +36,9 @@ async fn main() -> Result<()> {
             failures.join(", ")
         );
     }
-    if require_vietnamese && healthy_vietnamese == 0 {
+    if !failures.is_empty() {
         anyhow::bail!(
-            "release blocked: no Vietnamese provider passed live playback certification; failures: {}",
+            "release blocked: enabled providers failed live playback certification: {}",
             failures.join(", ")
         );
     }
@@ -50,9 +46,10 @@ async fn main() -> Result<()> {
 }
 
 async fn certify(provider: &dyn AnimeProvider) -> Result<()> {
-    let queries = match provider.language() {
-        Language::English => &["One Piece", "Your Name"][..],
-        Language::Vietnamese => &["One Piece"][..],
+    let queries = match (provider.language(), provider.name()) {
+        (Language::English, "MovieBox") => &["One Piece", "Your Name"][..],
+        (Language::Vietnamese, "Niniyo") => &["Solo Leveling", "Attack on Titan"][..],
+        (Language::English, _) | (Language::Vietnamese, _) => &["One Piece"][..],
     };
     for query in queries {
         certify_query(provider, query)
@@ -105,6 +102,7 @@ async fn certify_query(provider: &dyn AnimeProvider, query: &str) -> Result<()> 
 fn query_aliases(query: &str) -> Vec<&str> {
     match query {
         "One Piece" => vec!["One Piece", "Đảo Hải Tặc"],
+        "Attack on Titan" => vec!["Attack on Titan", "Đại Chiến Titan"],
         "Your Name" => vec!["Your Name", "Kimi no Na wa"],
         "Kimi no Na wa" => vec!["Kimi no Na wa", "Your Name"],
         _ => vec![query],
@@ -179,51 +177,65 @@ async fn certify_anime(
     provider: &dyn AnimeProvider,
     anime: &ani_desk_core::providers::Anime,
 ) -> Result<()> {
-    let episode = provider
+    let episodes = provider
         .get_episodes(&anime.id)
         .await
-        .context("episode listing failed")?
-        .into_iter()
-        .next_back()
-        .context("episode listing returned no episodes")?;
-    let stream = provider
-        .get_stream_url(&episode.id)
-        .await
-        .context("stream resolution failed")?;
-    let media_host = reqwest::Url::parse(&stream.video_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_string))
-        .unwrap_or_else(|| "unparseable-host".to_string());
-    println!(
-        "  {} stream: {} [{}] -> media host {}",
-        provider.name(),
-        anime.title,
-        anime.id,
-        media_host
-    );
+        .context("episode listing failed")?;
+    anyhow::ensure!(!episodes.is_empty(), "episode listing returned no episodes");
 
-    let mut headers = HeaderMap::new();
-    for (name, value) in stream.headers {
-        headers.insert(
-            HeaderName::from_bytes(name.as_bytes()).context("invalid stream header name")?,
-            HeaderValue::from_str(&value).context("invalid stream header value")?,
+    let mut last_error = None;
+    for episode in episodes.into_iter().rev().take(24) {
+        let stream = match provider.get_stream_url(&episode.id).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                last_error = Some(error.context("stream resolution failed"));
+                continue;
+            }
+        };
+        let stream_host = reqwest::Url::parse(&stream.video_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .unwrap_or_else(|| "unknown-host".to_string());
+        println!(
+            "  {} stream: {} [{}] episode {} -> {}",
+            provider.name(),
+            anime.title,
+            anime.id,
+            episode.number,
+            stream_host
         );
-    }
-    headers.insert(RANGE, HeaderValue::from_static("bytes=0-4095"));
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .default_headers(headers)
-        .build()?;
-    let response = client.get(&stream.video_url).send().await?;
-    let status = response.status();
-    if !status.is_success() && status.as_u16() != 206 {
-        anyhow::bail!("playlist/media retrieval returned HTTP {status}");
-    }
-    if stream.video_url.to_ascii_lowercase().contains(".m3u8") {
-        let body = response.text().await?;
-        if !body.trim_start().starts_with("#EXTM3U") {
-            anyhow::bail!("resolved HLS URL did not return an HLS playlist");
+
+        let mut headers = HeaderMap::new();
+        for (name, value) in stream.headers {
+            headers.insert(
+                HeaderName::from_bytes(name.as_bytes()).context("invalid stream header name")?,
+                HeaderValue::from_str(&value).context("invalid stream header value")?,
+            );
         }
+        headers.insert(RANGE, HeaderValue::from_static("bytes=0-4095"));
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .default_headers(headers)
+            .build()?;
+        let response = client.get(&stream.video_url).send().await?;
+        let status = response.status();
+        if !status.is_success() && status.as_u16() != 206 {
+            last_error = Some(anyhow::anyhow!(
+                "playlist/media retrieval returned HTTP {status}"
+            ));
+            continue;
+        }
+        if stream.video_url.to_ascii_lowercase().contains(".m3u8") {
+            let body = response.text().await?;
+            if !body.trim_start().starts_with("#EXTM3U") {
+                last_error = Some(anyhow::anyhow!(
+                    "resolved HLS URL did not return an HLS playlist"
+                ));
+                continue;
+            }
+        }
+        return Ok(());
     }
-    Ok(())
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no recent episode produced a stream")))
 }

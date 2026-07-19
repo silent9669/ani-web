@@ -3857,6 +3857,18 @@ button:active:not(:disabled) {
   line-height: 0.92;
 }
 
+.home-feature-copy h1.long {
+  max-width: 18ch;
+  font-size: clamp(2.45rem, 4.2vw, 4rem);
+  line-height: 0.96;
+}
+
+.home-feature-copy h1.very-long {
+  max-width: 22ch;
+  font-size: clamp(2.15rem, 3.4vw, 3.25rem);
+  line-height: 1;
+}
+
 .home-feature-description {
   display: -webkit-box;
   max-width: 62ch;
@@ -4387,6 +4399,14 @@ button:active:not(:disabled) {
     font-size: clamp(3.5rem, 6vw, 5.75rem);
   }
 
+  .home-feature-copy h1.long {
+    font-size: clamp(2.65rem, 4.2vw, 4rem);
+  }
+
+  .home-feature-copy h1.very-long {
+    font-size: clamp(2.25rem, 3.4vw, 3.25rem);
+  }
+
   .home-command-actions {
     grid-column: 2;
     grid-row: 2;
@@ -4454,6 +4474,13 @@ button:active:not(:disabled) {
 
   .home-feature-copy h1 {
     font-size: clamp(2.65rem, 14vw, 4.25rem);
+  }
+
+  .home-feature-copy h1.long,
+  .home-feature-copy h1.very-long {
+    max-width: 18ch;
+    font-size: clamp(2.1rem, 10.5vw, 3rem);
+    line-height: 0.98;
   }
 
   .home-command-actions {
@@ -6938,6 +6965,13 @@ select:focus-visible {
     padding-block-end: 0;
   }
 
+  .catalog-browser {
+    inset-inline-start: 6.75rem;
+    width: auto;
+    max-width: none;
+    margin-inline: 0;
+  }
+
   .app-navigation {
     inset: max(var(--space-md), env(safe-area-inset-top)) auto max(var(--space-md), env(safe-area-inset-bottom)) max(var(--space-sm), env(safe-area-inset-left));
     display: grid;
@@ -7040,6 +7074,10 @@ select:focus-visible {
     padding-inline-start: 7.5rem;
   }
 
+  .catalog-browser {
+    inset-inline-start: 7.5rem;
+  }
+
   .app-navigation {
     width: 5.5rem;
   }
@@ -7062,6 +7100,228 @@ select:focus-visible {
   input,
   select {
     min-height: 3rem;
+  }
+}
+
+/* Hosted web QA repair layer: keep navigation clear of content, constrain the
+   episode chooser to its own scroll region, and make Safari login state easy
+   to verify. This stays last so legacy desktop rules cannot reopen page scroll. */
+.login-password-field {
+  position: relative;
+  display: block;
+}
+
+.login-password-field input {
+  padding-inline-end: 3.25rem;
+}
+
+.login-password-toggle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0.35rem;
+  display: grid;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  margin: auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-input);
+  color: var(--color-muted);
+  background: transparent;
+}
+
+.login-password-toggle:hover,
+.login-password-toggle:focus-visible {
+  color: var(--color-ink);
+  background: var(--color-paper-3);
+}
+
+.login-error {
+  align-items: flex-start;
+}
+
+.login-error > svg {
+  flex: 0 0 auto;
+  margin-block-start: 0.12rem;
+}
+
+.login-error span,
+.login-error small {
+  display: block;
+}
+
+.login-error small {
+  margin-block-start: var(--space-3xs);
+  color: var(--color-muted);
+  line-height: 1.4;
+}
+
+.mobile-detail-back {
+  display: none;
+}
+
+.episode-list-shell,
+.episode-list {
+  min-height: 0;
+}
+
+.episode-list {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 59.999rem) {
+  .app-shell > main {
+    min-width: 0;
+    overflow-x: clip;
+  }
+
+  .home-dashboard {
+    padding-block-end: calc(6rem + env(safe-area-inset-bottom));
+  }
+
+  .home-dashboard .content-row:has(.empty-row) {
+    padding-block: var(--space-sm);
+  }
+
+  .home-dashboard .card-row.empty-row {
+    height: auto;
+    min-height: 7rem;
+    align-items: stretch;
+    overflow: visible;
+  }
+
+  .home-dashboard .shelf-empty-card,
+  .home-dashboard .catalog-row .shelf-empty-card {
+    min-height: 6.25rem;
+    height: auto;
+  }
+
+  .search-preview {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .search-preview .preview-copy {
+    bottom: calc(5rem + env(safe-area-inset-bottom));
+    padding-block-end: var(--space-md);
+  }
+
+  .downloads-page,
+  .admin-page,
+  .settings-page,
+  .catalog-browser {
+    max-width: 100%;
+    min-width: 0;
+    padding-block-end: calc(6rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 47.5rem) {
+  .detail-page {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden !important;
+    padding: 0 !important;
+    overscroll-behavior: none;
+  }
+
+  .detail-page-shell,
+  .platform-macos .detail-page-shell {
+    position: absolute;
+    inset-block-start: max(var(--space-xs), env(safe-area-inset-top));
+    inset-inline: max(var(--space-xs), env(safe-area-inset-left)) max(var(--space-xs), env(safe-area-inset-right));
+    inset-block-end: calc(5.35rem + env(safe-area-inset-bottom));
+    display: grid;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 !important;
+  }
+
+  .detail-chooser-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .episode-range-panel,
+  .detail-info-panel {
+    display: none;
+  }
+
+  .episode-list-panel {
+    order: initial;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: var(--space-sm);
+  }
+
+  .episode-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--space-xs);
+    padding-inline-end: 0;
+  }
+
+  .mobile-detail-back {
+    display: grid;
+  }
+
+  .episode-list-shell {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .episode-list {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-block-end: max(var(--space-sm), env(safe-area-inset-bottom));
+  }
+
+  .episode-list::-webkit-scrollbar {
+    display: block;
+    width: 0.28rem;
+  }
+
+  .episode-list::-webkit-scrollbar-thumb {
+    border-radius: var(--radius-pill);
+    background: var(--color-rule);
+  }
+
+  .search-layout.mobile-preview-open .search-preview .detail-actions {
+    padding-block-end: var(--space-xs);
+  }
+}
+
+@media (max-width: 39.999rem) {
+  .episode-list-panel {
+    padding: var(--space-xs);
+  }
+
+  .episode-heading-actions strong {
+    font-size: var(--text-xs);
+  }
+
+  .episode-list-row {
+    grid-template-columns: 3.2rem minmax(0, 1fr) auto;
   }
 }
 
@@ -7746,4 +8006,375 @@ select:focus-visible {
   .settings-theme-card { grid-column: auto; }
   .settings-edit-card .settings-section-heading { min-height: 0; }
   .search-preview .preview-copy { max-width: 100%; }
+}
+
+/* Hallmark · QA repair layer · macrostructure: Workbench · theme: studied-DNA (source: ani-desk design.md)
+ * protected data / useful empty states / rail-safe detail / coarse-pointer parity
+ */
+.app-navigation {
+  z-index: var(--z-sticky-nav);
+}
+
+.shelf-empty-state {
+  display: grid;
+  justify-items: start;
+  width: min(42rem, 100%);
+  min-width: 0;
+  gap: var(--space-xs);
+  margin-block-start: var(--space-md);
+  padding: var(--space-lg);
+  border: var(--rule-hair) solid var(--color-rule-2);
+  border-radius: var(--radius-sheet);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+}
+
+.shelf-empty-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-input);
+  color: var(--color-accent);
+  background: var(--color-paper-3);
+}
+
+.shelf-empty-state h2,
+.shelf-empty-state p {
+  margin: 0;
+}
+
+.shelf-empty-state h2 {
+  font-size: var(--text-2xl);
+  line-height: 1;
+}
+
+.shelf-empty-state p {
+  max-width: 58ch;
+  color: var(--color-muted);
+}
+
+.shelf-empty-state .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+  min-height: 3rem;
+  padding-inline: var(--space-md);
+  border-radius: var(--radius-input);
+}
+
+.admin-user-protected {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border-color: var(--color-rule);
+}
+
+.admin-protected-identity {
+  min-width: 0;
+}
+
+.admin-protected-identity strong,
+.admin-protected-identity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-protected-identity small,
+.admin-user-protected > p {
+  color: var(--color-muted);
+}
+
+.admin-protected-badges {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: var(--space-2xs);
+}
+
+.admin-protected-badges span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  min-height: 2.25rem;
+  padding-inline: var(--space-xs);
+  border: var(--rule-hair) solid var(--color-rule-2);
+  border-radius: var(--radius-pill);
+  color: var(--color-ink-2);
+  background: var(--color-paper-2);
+  font-size: var(--text-xs);
+}
+
+.admin-protected-badges span:first-child {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+  background: var(--color-accent-faint);
+}
+
+.admin-user-protected > p {
+  grid-column: 2 / -1;
+  max-width: 68ch;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.login-showcase-copy h1 {
+  line-height: 0.98;
+}
+
+@media (min-width: 40rem) {
+  .login-screen {
+    grid-template-columns: minmax(0, 1.28fr) minmax(24rem, 0.72fr);
+  }
+
+  .login-showcase-copy h1 {
+    max-width: 11ch;
+    font-size: clamp(3.75rem, 6.5vw, 5.25rem);
+  }
+
+  .login-card {
+    width: min(27rem, calc(100% - var(--space-lg)));
+    padding: var(--space-lg);
+  }
+}
+
+@media (min-width: 60rem) {
+  .detail-page-shell,
+  .edition-desktop .detail-page-shell {
+    inset-block: var(--space-sm);
+    inset-inline-end: var(--space-lg);
+    inset-inline-start: calc(6.75rem + var(--space-md)) !important;
+  }
+
+  .platform-macos .detail-page-shell,
+  .platform-macos .edition-desktop .detail-page-shell {
+    inset-block-start: var(--space-xl);
+  }
+}
+
+@media (min-width: 90rem) {
+  .detail-page-shell,
+  .edition-desktop .detail-page-shell {
+    inset-inline-start: calc(7.5rem + var(--space-md)) !important;
+  }
+}
+
+@media (max-width: 47.5rem) {
+  .detail-page-shell {
+    padding-block-end: calc(6rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .icon-button,
+  .language-switch button,
+  .settings-language-switch button,
+  .provider-chip,
+  .search-suggestions button,
+  .episode-download-button,
+  .player-top button,
+  .player-leading-controls button,
+  .player-volume-dock button,
+  .player-utility-pill button,
+  .player-utility-pill label,
+  .player-bottom button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .language-switch button,
+  .settings-language-switch button,
+  .provider-chip,
+  .search-suggestions button {
+    padding-inline: var(--space-xs);
+  }
+
+  .episode-download-button,
+  .player-top button,
+  .player-leading-controls button,
+  .player-volume-dock button,
+  .player-utility-pill button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .shelf-empty-state {
+    padding: var(--space-md);
+  }
+
+  .admin-user-protected {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-protected-badges,
+  .admin-user-protected > p {
+    grid-column: 1 / -1;
+  }
+
+  .admin-protected-badges {
+    justify-content: start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 39.999rem) {
+  .login-showcase {
+    align-content: start;
+    gap: var(--space-sm);
+    padding: max(var(--space-md), env(safe-area-inset-top)) var(--space-md) var(--space-md);
+  }
+
+  .login-showcase-copy h1 {
+    margin-block-end: var(--space-xs);
+    font-size: clamp(2.5rem, 13vw, 3.35rem);
+  }
+
+  .login-showcase-copy > span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .login-card {
+    padding: var(--space-md) max(var(--space-md), env(safe-area-inset-right)) max(var(--space-lg), env(safe-area-inset-bottom)) max(var(--space-md), env(safe-area-inset-left));
+  }
+
+  .login-copy {
+    margin: var(--space-md) 0 var(--space-sm);
+  }
+}
+
+@media (pointer: coarse) {
+  .home-feature-dots button,
+  .episode-range-button,
+  .episode-download-button,
+  .language-switch button,
+  .settings-language-switch button,
+  .provider-chip,
+  .catalog-pagination button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/* Final hosted cascade guard. Keep this rule-set at EOF: the stylesheet still
+   carries desktop-era compatibility layers above it. */
+@media (max-width: 59.999rem) {
+  .home-dashboard {
+    padding-block-end: calc(6rem + env(safe-area-inset-bottom));
+  }
+
+  .home-dashboard .card-row.empty-row {
+    height: auto;
+    min-height: 7rem;
+    align-items: stretch;
+    overflow: visible;
+  }
+
+  .home-dashboard .shelf-empty-card,
+  .home-dashboard .catalog-row .shelf-empty-card {
+    height: auto;
+    min-height: 6.25rem;
+  }
+
+  .search-preview {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .search-preview .preview-copy {
+    bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 47.5rem) {
+  .detail-page {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden !important;
+    padding: 0 !important;
+    overscroll-behavior: none;
+  }
+
+  .detail-page-shell,
+  .platform-macos .detail-page-shell,
+  .edition-desktop .detail-page-shell,
+  .platform-macos .edition-desktop .detail-page-shell {
+    position: absolute;
+    inset-block-start: max(var(--space-xs), env(safe-area-inset-top));
+    inset-inline: max(var(--space-xs), env(safe-area-inset-left)) max(var(--space-xs), env(safe-area-inset-right));
+    inset-block-end: calc(5.35rem + env(safe-area-inset-bottom));
+    display: grid;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 !important;
+  }
+
+  .detail-chooser-grid,
+  .edition-desktop .detail-chooser-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .episode-range-panel,
+  .detail-info-panel {
+    display: none;
+  }
+
+  .episode-list-panel {
+    order: initial;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: var(--space-sm);
+  }
+
+  .episode-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--space-xs);
+    padding-inline-end: 0;
+  }
+
+  .mobile-detail-back {
+    display: grid;
+  }
+
+  .episode-list-shell {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .episode-list {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .episode-list::-webkit-scrollbar {
+    display: block;
+    width: 0.28rem;
+  }
 }

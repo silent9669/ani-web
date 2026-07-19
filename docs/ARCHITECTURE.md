@@ -2,10 +2,7 @@
 
 ## Overview
 
-`ani-desk` is a private anime client with two delivery targets that share one
-React interface and one Rust core: a Tauri v2 desktop application and an
-authenticated hosted web service for a small family. Both use AniList for
-discovery and query each playback provider as a separate catalog.
+`ani-desk` is a Tauri v2 desktop app with AniList catalog discovery and health-gated playback providers. It runs locally with no ani-desk application server.
 
 ## Stack
 
@@ -16,10 +13,9 @@ discovery and query each playback provider as a separate catalog.
 | Icons | `lucide-react` | `web/src/App.tsx` |
 | Video | `hls.js` (HLS), `dashjs` (DASH), native `<video>` (MP4) | `web/src/App.tsx` |
 | Backend | Rust (Tauri v2) | `src-tauri/` |
-| Hosted Backend | Axum HTTP server, cookie sessions, admin-managed users | `server/` |
 | Core Library | `ani-desk-core` (providers, config, SQLite DB) | `src/` |
 | Desktop Shell | Tauri v2 IPC bridge | `src-tauri/src/main.rs` |
-| Playback Proxy | Axum media proxy for desktop and authenticated hosted routes | `src/player.rs`, `server/` |
+| Playback Proxy | Axum localhost-only proxy | `src/player.rs` |
 
 ## Code Layout
 
@@ -49,13 +45,6 @@ src-tauri/
 ├── tauri.conf.json  # Window config (1440x900, min 1100x720)
 ├── capabilities/    # Tauri v2 capability permissions
 └── icons/
-
-server/
-└── src/main.rs      # Hosted HTTP API, auth/session boundary, static web delivery
-
-compose.yaml         # Loopback-only homelab container service
-Dockerfile           # Reproducible web + Rust server image
-tokens.css           # Shared Hallmark design tokens and theme variants
 
 packaging/
 ├── homebrew/Casks/ani-desk.rb  # Brew cask placeholder
@@ -96,8 +85,6 @@ packaging/
 | `detail` | `DetailPage` | Three-panel episode chooser: range rail, active episode list, poster/details |
 | `continue` | `HistoryPage` | Full history grid with filter/sort |
 | `my-list` | `MyListPage` | Full favorites grid with filter/sort |
-| `settings` | `SettingsPage` | Provider defaults, health recovery, themes, and family access |
-| `admin` | `AdminPage` | Hosted admin-only family account management |
 
 Plus overlays:
 - `VideoPlayer` — HLS/MP4 playback with custom controls
@@ -105,14 +92,12 @@ Plus overlays:
 ## Key Design Decisions
 
 - **Single-file route surface**: Most UI components still live in `App.tsx` so route state, playback state, and motion transitions remain easy to follow.
-- **CSS variables theme**: The locked Obsidian Cinema system lives in root `tokens.css`; `styles.css` consumes semantic tokens. No CSS framework.
+- **CSS variables theme**: Dark theme defined in `:root` in `styles.css`. No CSS framework.
 - **framer-motion**: Used for page transitions, card hover, shared search transition, and player enter/exit.
 - **Availability controls**: Search separates English and Vietnamese choices, shows direct provider results before AniList catalog matches, and enables only providers that can play the selected title.
 - **Episode ranges**: For long-running shows (500+ episodes), episodes are chunked into ranges of 50.
-- **Playback proxy**: Desktop playback binds locally. Hosted playback rewrites HLS/DASH manifests to opaque, user-bound proxy routes so provider headers and upstream media URLs stay server-side.
-- **Provider certification**: AllAnime remains visible/default and supports manual recovery when changing request crypto or Cloudflare blocks direct access. AnimeGG and MovieBox are certified English fallbacks; KKPhim and OPhim are certified Vietnamese providers. Retired duplicate/broken adapters are excluded from the active registry.
-- **Private hosted boundary**: The web server requires a signed HttpOnly session for application APIs, keeps provider requests server-side, and is intended to sit behind HTTPS on a reverse proxy or private overlay network.
-- **One-repository delivery**: Desktop bundles and the homelab container are independent build targets in this repository so provider, UI, and database behavior do not drift.
+- **Playback proxy**: Axum binds to 127.0.0.1, rewrites HLS/DASH manifests so provider headers are applied safely.
+- **Provider certification**: AllAnime remains visible/default but can be health-gated as `PROVIDER_CAPTCHA`; AnimeGG is the currently certified English fallback, KKPhim/OPhim are certified Vietnamese providers, MovieBox is health-gated while its signed API returns `miss token`, and AnimeVietSub is visible but health-gated while AniMapper source resolution fails.
 - **Signed updates**: Tauri updater checks GitHub `latest.json`, prompts in-app, installs signed updater artifacts, and relaunches.
 
 ## Verification Commands
@@ -120,17 +105,15 @@ Plus overlays:
 ```bash
 npm run build
 npm run check:icons
+npm run check:release-version -- v1.0.2
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo audit
 cargo run --example provider_certification -- --require-english
 pytest tests/e2e
-docker compose config --quiet
-docker compose build
-./script/build_and_run.sh --verify
+npm run tauri -- build --debug --no-bundle
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/ani-desk-v1.key")" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+npm run tauri -- build --bundles app,dmg
 ```
-
-Release signing and deployment are deliberately separate from this local
-verification list. See `HOMELAB_OPERATIONS.md` for deployment, networking,
-monitoring, backup, update, and rollback procedures.

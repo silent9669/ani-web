@@ -1,5 +1,9 @@
 # ani-desk homelab deployment and operations
 
+> This is the original single-container/Tailscale guide. For the production
+> Caddy deployment, CI-gated updates, data-preserving rollback, monitoring, and
+> incident response, use `docs/ANI_WEB_HOMELAB_HANDBOOK.md`.
+
 This guide explains how to deploy, secure, inspect, back up, update, and recover
 the hosted ani-desk service from a command line. It describes operations and
 networking, not application code.

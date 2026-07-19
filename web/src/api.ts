@@ -42,11 +42,28 @@ async function webRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ...init?.headers,
       },
     });
+    const contentType = response.headers.get("content-type") ?? "";
+    const isJson = contentType.includes("application/json");
     if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw body ?? new Error(`ani-desk web request failed with HTTP ${response.status}`);
+      const body = isJson ? await response.json().catch(() => null) : null;
+      throw body ?? {
+        code: "SERVICE_UNAVAILABLE",
+        message: "The ani-desk service is not available at this address.",
+        operation: "web-request",
+        retryable: response.status >= 500,
+        correlationId: crypto.randomUUID(),
+      };
     }
     if (response.status === 204) return undefined as T;
+    if (!isJson) {
+      throw {
+        code: "INVALID_SERVICE_RESPONSE",
+        message: "The ani-desk service returned an unexpected response.",
+        operation: "web-request",
+        retryable: true,
+        correlationId: crypto.randomUUID(),
+      };
+    }
     return response.json() as Promise<T>;
   } finally {
     globalThis.clearTimeout(timeout);

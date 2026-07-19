@@ -1,7 +1,9 @@
 mod db;
 
 use ani_desk_core::{
-    catalog::{CatalogClient, CatalogFilters},
+    catalog::{
+        apply_personal_matches, CatalogAnime, CatalogClient, CatalogFilters, TastePreference,
+    },
     config::Config,
     db::Database,
     metadata::MetadataCache,
@@ -10,7 +12,7 @@ use ani_desk_core::{
 use anyhow::{Context, Result};
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Path, Query, RawQuery, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post, put},
@@ -45,8 +47,6 @@ use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "ani_desk_session";
 const MAX_MEDIA_SESSIONS: usize = 2_048;
-const MAX_MEDIA_RESOURCES: usize = 4_096;
-const MEDIA_RESOURCE_TTL: Duration = Duration::from_secs(30 * 60);
 const LOGIN_ATTEMPT_WINDOW: Duration = Duration::from_secs(15 * 60);
 const LOGIN_ATTEMPT_LIMIT: usize = 8;
 const LOGIN_ATTEMPT_KEY_LIMIT: usize = 10_000;
@@ -78,13 +78,6 @@ struct MediaSession {
     expires_at: Instant,
     stream: StreamInfo,
     secret: [u8; 32],
-    resources: Arc<Mutex<HashMap<String, MediaResource>>>,
-}
-
-#[derive(Clone)]
-struct MediaResource {
-    url: Url,
-    inserted_at: Instant,
 }
 
 #[derive(Debug, Serialize)]
@@ -272,7 +265,8 @@ struct ProviderQuery {
 
 #[derive(Debug, Deserialize)]
 struct ResourceQuery {
-    token: String,
+    url: String,
+    sig: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -415,6 +409,7 @@ async fn main() -> Result<()> {
         .nest("/api", api)
         .fallback_service(static_files)
         .with_state(state)
+        .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("private, no-cache")))
         .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("strict-transport-security"), HeaderValue::from_static("max-age=31536000; includeSubDomains")))
         .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("strict-origin-when-cross-origin")))
@@ -780,12 +775,16 @@ async fn provider_access(
 }
 
 async fn discovery(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
-    require_user(&state, &headers).await?;
-    Ok(Json(json!(state
+    let user = require_user(&state, &headers).await?;
+    let mut discovery = state
         .catalog
         .discovery()
         .await
-        .map_err(|error| ApiError::internal("catalog", error))?)))
+        .map_err(|error| ApiError::internal("catalog", error))?;
+    let preferences = catalog_preferences(&state, &user.id).await;
+    apply_personal_matches(&mut discovery.trending, &preferences);
+    apply_personal_matches(&mut discovery.popular_this_season, &preferences);
+    Ok(Json(json!(discovery)))
 }
 
 async fn search_catalog(
@@ -793,15 +792,14 @@ async fn search_catalog(
     headers: HeaderMap,
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<Value>> {
-    require_user(&state, &headers).await?;
-    Ok(Json(json!(state
+    let user = require_user(&state, &headers).await?;
+    let mut items = state
         .catalog
         .search(query.query.trim(), 24)
         .await
-        .map_err(|error| ApiError::internal(
-            "catalog-search",
-            error
-        ))?)))
+        .map_err(|error| ApiError::internal("catalog-search", error))?;
+    personalize_catalog_items(&state, &user.id, &mut items).await;
+    Ok(Json(json!(items)))
 }
 
 async fn genre_catalog(
@@ -809,12 +807,14 @@ async fn genre_catalog(
     headers: HeaderMap,
     Path(genre): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    require_user(&state, &headers).await?;
-    Ok(Json(json!(state
+    let user = require_user(&state, &headers).await?;
+    let mut items = state
         .catalog
         .by_genre(&genre, 24)
         .await
-        .map_err(|error| ApiError::internal("catalog", error))?)))
+        .map_err(|error| ApiError::internal("catalog", error))?;
+    personalize_catalog_items(&state, &user.id, &mut items).await;
+    Ok(Json(json!(items)))
 }
 
 async fn catalog(
@@ -822,12 +822,82 @@ async fn catalog(
     headers: HeaderMap,
     Json(input): Json<CatalogInput>,
 ) -> ApiResult<Json<Value>> {
-    require_user(&state, &headers).await?;
-    Ok(Json(json!(state
+    let user = require_user(&state, &headers).await?;
+    let mut page = state
         .catalog
         .catalog(&input.filters, &input.sort, input.page.unwrap_or(1), 24)
         .await
-        .map_err(|error| ApiError::internal("catalog", error))?)))
+        .map_err(|error| ApiError::internal("catalog", error))?;
+    personalize_catalog_items(&state, &user.id, &mut page.items).await;
+    Ok(Json(json!(page)))
+}
+
+async fn personalize_catalog_items(state: &AppState, user_id: &str, items: &mut [CatalogAnime]) {
+    let preferences = catalog_preferences(state, user_id).await;
+    apply_personal_matches(items, &preferences);
+}
+
+async fn catalog_preferences(state: &AppState, user_id: &str) -> Vec<TastePreference> {
+    let histories = state.db.history(user_id, 100).await.unwrap_or_default();
+    let favorites = state.db.favorites(user_id, 100).await.unwrap_or_default();
+    let mut weighted_ids = HashMap::<i64, f64>::new();
+
+    for history in &histories {
+        if let Some(catalog_id) = history.catalog_id {
+            let progress = if history.total_seconds > 0 {
+                history.position_seconds as f64 / history.total_seconds as f64
+            } else {
+                0.0
+            };
+            *weighted_ids.entry(catalog_id).or_default() += 1.0 + 2.0 * progress.clamp(0.0, 1.0);
+        }
+    }
+    for favorite in &favorites {
+        if let Some(catalog_id) = favorite.catalog_id {
+            *weighted_ids.entry(catalog_id).or_default() += 3.0;
+        }
+    }
+
+    // Older rows may predate catalog IDs. Resolve only a few per request so
+    // existing user data contributes without adding unbounded network work.
+    let unresolved = histories
+        .iter()
+        .filter(|item| item.catalog_id.is_none())
+        .map(|item| (item.title.as_str(), 1.0))
+        .chain(
+            favorites
+                .iter()
+                .filter(|item| item.catalog_id.is_none())
+                .map(|item| (item.title.as_str(), 3.0)),
+        )
+        .take(4);
+    for (title, weight) in unresolved {
+        if let Ok(matches) = state.catalog.search(title, 3).await {
+            if let Some(item) = matches
+                .into_iter()
+                .find(|item| normalize_title(&item.title) == normalize_title(title))
+            {
+                *weighted_ids.entry(item.catalog_id).or_default() += weight;
+            }
+        }
+    }
+
+    let metadata = state
+        .catalog
+        .by_ids(&weighted_ids.keys().copied().collect::<Vec<_>>())
+        .await
+        .unwrap_or_default();
+    metadata
+        .into_iter()
+        .filter_map(|item| {
+            weighted_ids
+                .get(&item.catalog_id)
+                .map(|weight| TastePreference {
+                    genres: item.genres,
+                    weight: *weight,
+                })
+        })
+        .collect()
 }
 
 async fn availability(
@@ -988,14 +1058,13 @@ async fn playback(
     let id = Uuid::new_v4().to_string();
     let mut secret = [0_u8; 32];
     OsRng.fill_bytes(&mut secret);
-    let mut resources = HashMap::new();
     let subtitles = stream
         .subtitles
         .iter()
         .filter_map(|subtitle| {
             Url::parse(&subtitle.url).ok().map(|url| SubtitleDto {
                 language: subtitle.language.clone(),
-                url: registered_resource_url(&id, &secret, &mut resources, &url),
+                url: signed_resource_url(&id, &secret, &url),
             })
         })
         .collect();
@@ -1019,14 +1088,12 @@ async fn playback(
             expires_at: now + Duration::from_secs(6 * 60 * 60),
             stream: stream.clone(),
             secret,
-            resources: Arc::new(Mutex::new(resources)),
         },
     );
-    let playback_url = format!("/api/media/{id}");
     Ok(Json(PlaybackDto {
         session_id: id.clone(),
-        playback_url: playback_url.clone(),
-        original_url: playback_url,
+        playback_url: format!("/api/media/{id}"),
+        original_url: stream.video_url.clone(),
         stream_kind: if stream.video_url.to_ascii_lowercase().contains(".m3u8") {
             "hls"
         } else if stream.video_url.to_ascii_lowercase().contains(".mpd") {
@@ -1068,13 +1135,25 @@ async fn media_resource(
 ) -> ApiResult<Response> {
     let user = require_user(&state, &headers).await?;
     let session = get_media_session(&state, &id, &user.id).await?;
-    let url = session
-        .resources
-        .lock()
-        .await
-        .get(&query.token)
-        .map(|resource| resource.url.clone())
-        .ok_or_else(invalid_media_resource)?;
+    verify_resource_signature(&session.secret, &query.url, &query.sig)?;
+    let url = Url::parse(&query.url).map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_MEDIA_RESOURCE",
+            "playback",
+            error.to_string(),
+            false,
+        )
+    })?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_MEDIA_RESOURCE",
+            "playback",
+            "Only HTTP media resources are supported.",
+            false,
+        ));
+    }
     proxy_media_url(&state, &id, &session, url, &headers).await
 }
 
@@ -1082,37 +1161,27 @@ async fn media_dash_resource(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, path)): Path<(String, String)>,
-    RawQuery(raw_query): RawQuery,
 ) -> ApiResult<Response> {
     let user = require_user(&state, &headers).await?;
     let session = get_media_session(&state, &id, &user.id).await?;
     let Some(value) = path.strip_prefix("base/") else {
         return Err(invalid_dash_resource());
     };
-    let mut parts = value.splitn(2, '/');
-    let token = parts.next().unwrap_or_default();
+    let mut parts = value.splitn(3, '/');
+    let encoded_base = parts.next().unwrap_or_default();
+    let signature = parts.next().unwrap_or_default();
     let relative_path = parts.next().unwrap_or_default();
-    let base = session
-        .resources
-        .lock()
-        .await
-        .get(token)
-        .map(|resource| resource.url.clone())
-        .ok_or_else(invalid_dash_resource)?;
-    let mut upstream = resolve_dash_upstream(base, relative_path)?;
-    append_upstream_query(&mut upstream, raw_query.as_deref());
+    let base_bytes = URL_SAFE_NO_PAD
+        .decode(encoded_base)
+        .map_err(|_| invalid_dash_resource())?;
+    let base_value = String::from_utf8(base_bytes).map_err(|_| invalid_dash_resource())?;
+    verify_resource_signature(&session.secret, &base_value, signature)?;
+    let base = Url::parse(&base_value).map_err(|_| invalid_dash_resource())?;
+    if !matches!(base.scheme(), "http" | "https") {
+        return Err(invalid_dash_resource());
+    }
+    let upstream = resolve_dash_upstream(base, relative_path)?;
     proxy_media_url(&state, &id, &session, upstream, &headers).await
-}
-
-fn append_upstream_query(upstream: &mut Url, raw_query: Option<&str>) {
-    let Some(raw_query) = raw_query.filter(|query| !query.is_empty()) else {
-        return;
-    };
-    let combined = match upstream.query() {
-        Some(existing) if !existing.is_empty() => format!("{existing}&{raw_query}"),
-        _ => raw_query.to_string(),
-    };
-    upstream.set_query(Some(&combined));
 }
 
 fn resolve_dash_upstream(base: Url, relative_path: &str) -> ApiResult<Url> {
@@ -1130,15 +1199,11 @@ fn resolve_dash_upstream(base: Url, relative_path: &str) -> ApiResult<Url> {
 }
 
 fn invalid_dash_resource() -> ApiError {
-    invalid_media_resource()
-}
-
-fn invalid_media_resource() -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
         "INVALID_MEDIA_RESOURCE",
         "playback",
-        "The media resource is invalid.",
+        "The DASH media resource is invalid.",
         false,
     )
 }
@@ -1228,9 +1293,7 @@ async fn proxy_media_url(
                     true,
                 )
             })?;
-        let mut resources = session.resources.lock().await;
-        let rewritten =
-            rewrite_hls_manifest(session_id, &session.secret, &url, &text, &mut resources);
+        let rewritten = rewrite_hls_manifest(session_id, &session.secret, &url, &text);
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
@@ -1266,9 +1329,7 @@ async fn proxy_media_url(
                     true,
                 )
             })?;
-        let mut resources = session.resources.lock().await;
-        let rewritten =
-            rewrite_dash_manifest(session_id, &session.secret, &url, &text, &mut resources);
+        let rewritten = rewrite_dash_manifest(session_id, &session.secret, &url, &text);
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/dash+xml; charset=utf-8")
@@ -1303,13 +1364,7 @@ async fn proxy_media_url(
         .map_err(|error| ApiError::internal("playback", error))
 }
 
-fn rewrite_hls_manifest(
-    session_id: &str,
-    secret: &[u8; 32],
-    base: &Url,
-    manifest: &str,
-    resources: &mut HashMap<String, MediaResource>,
-) -> String {
+fn rewrite_hls_manifest(session_id: &str, secret: &[u8; 32], base: &Url, manifest: &str) -> String {
     manifest
         .lines()
         .map(|line| {
@@ -1320,17 +1375,14 @@ fn rewrite_hls_manifest(
             if !trimmed.starts_with('#') {
                 return base
                     .join(trimmed)
-                    .map(|url| registered_resource_url(session_id, secret, resources, &url))
+                    .map(|url| signed_resource_url(session_id, secret, &url))
                     .unwrap_or_else(|_| line.to_string());
             }
             if let Some(uri) = quoted_attribute(trimmed, "URI") {
                 if let Ok(url) = base.join(&uri) {
                     return line.replacen(
                         &format!("URI=\"{uri}\""),
-                        &format!(
-                            "URI=\"{}\"",
-                            registered_resource_url(session_id, secret, resources, &url)
-                        ),
+                        &format!("URI=\"{}\"", signed_resource_url(session_id, secret, &url)),
                         1,
                     );
                 }
@@ -1346,7 +1398,6 @@ fn rewrite_dash_manifest(
     secret: &[u8; 32],
     manifest_url: &Url,
     manifest: &str,
-    resources: &mut HashMap<String, MediaResource>,
 ) -> String {
     let mut output = String::with_capacity(manifest.len() + 128);
     let mut remaining = manifest;
@@ -1365,9 +1416,7 @@ fn rewrite_dash_manifest(
         let absolute = manifest_url
             .join(original)
             .unwrap_or_else(|_| manifest_url.clone());
-        output.push_str(&registered_dash_base(
-            session_id, secret, resources, &absolute,
-        ));
+        output.push_str(&signed_dash_base(session_id, secret, &absolute));
         output.push_str("</BaseURL>");
         remaining = &remaining[close + "</BaseURL>".len()..];
         found_base = true;
@@ -1386,7 +1435,7 @@ fn rewrite_dash_manifest(
                 insert_at,
                 &format!(
                     "<BaseURL>{}</BaseURL>",
-                    registered_dash_base(session_id, secret, resources, &parent)
+                    signed_dash_base(session_id, secret, &parent)
                 ),
             );
         }
@@ -1394,64 +1443,47 @@ fn rewrite_dash_manifest(
     output
 }
 
-fn registered_dash_base(
-    session_id: &str,
-    secret: &[u8; 32],
-    resources: &mut HashMap<String, MediaResource>,
-    base: &Url,
-) -> String {
-    let token = register_media_resource(secret, resources, base);
-    format!("/api/media/{session_id}/dash/base/{token}/")
+fn signed_dash_base(session_id: &str, secret: &[u8; 32], base: &Url) -> String {
+    let encoded = URL_SAFE_NO_PAD.encode(base.as_str());
+    let signature = resource_signature(secret, base.as_str());
+    format!("/api/media/{session_id}/dash/base/{encoded}/{signature}/")
 }
 
-fn registered_resource_url(
-    session_id: &str,
-    secret: &[u8; 32],
-    resources: &mut HashMap<String, MediaResource>,
-    url: &Url,
-) -> String {
-    let token = register_media_resource(secret, resources, url);
-    format!("/api/media/{session_id}/resource?token={token}")
+fn signed_resource_url(session_id: &str, secret: &[u8; 32], url: &Url) -> String {
+    let encoded = url::form_urlencoded::byte_serialize(url.as_str().as_bytes()).collect::<String>();
+    format!(
+        "/api/media/{session_id}/resource?url={encoded}&sig={}",
+        resource_signature(secret, url.as_str())
+    )
 }
 
-fn register_media_resource(
-    secret: &[u8; 32],
-    resources: &mut HashMap<String, MediaResource>,
-    url: &Url,
-) -> String {
+fn resource_signature(secret: &[u8; 32], value: &str) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("fixed-size HMAC key");
-    mac.update(url.as_str().as_bytes());
-    let token = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    let now = Instant::now();
-    if resources.contains_key(&token) {
-        resources.insert(
-            token.clone(),
-            MediaResource {
-                url: url.clone(),
-                inserted_at: now,
-            },
-        );
-        return token;
-    }
-    resources.retain(|_, resource| now.duration_since(resource.inserted_at) < MEDIA_RESOURCE_TTL);
-    while resources.len() >= MAX_MEDIA_RESOURCES {
-        let Some(oldest) = resources
-            .iter()
-            .min_by_key(|(_, resource)| resource.inserted_at)
-            .map(|(token, _)| token.clone())
-        else {
-            break;
-        };
-        resources.remove(&oldest);
-    }
-    resources.insert(
-        token.clone(),
-        MediaResource {
-            url: url.clone(),
-            inserted_at: now,
-        },
-    );
-    token
+    mac.update(value.as_bytes());
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+fn verify_resource_signature(secret: &[u8; 32], value: &str, signature: &str) -> ApiResult<()> {
+    let signature = URL_SAFE_NO_PAD.decode(signature).map_err(|_| {
+        ApiError::new(
+            StatusCode::FORBIDDEN,
+            "INVALID_MEDIA_RESOURCE",
+            "playback",
+            "The media resource signature is invalid.",
+            false,
+        )
+    })?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("fixed-size HMAC key");
+    mac.update(value.as_bytes());
+    mac.verify_slice(&signature).map_err(|_| {
+        ApiError::new(
+            StatusCode::FORBIDDEN,
+            "INVALID_MEDIA_RESOURCE",
+            "playback",
+            "The media resource signature is invalid.",
+            false,
+        )
+    })
 }
 
 async fn my_list(
@@ -2241,49 +2273,18 @@ mod tests {
     fn dash_rewrite_signs_existing_and_default_base_urls() {
         let manifest_url = Url::parse("https://cdn.example/show/manifest.mpd").unwrap();
         let secret = [7_u8; 32];
-        let mut resources = HashMap::new();
         let with_base = rewrite_dash_manifest(
             "session",
             &secret,
             &manifest_url,
             "<MPD><Period><BaseURL>video/</BaseURL></Period></MPD>",
-            &mut resources,
         );
         assert!(with_base.contains("/api/media/session/dash/base/"));
         assert!(!with_base.contains(">video/</BaseURL>"));
-        assert!(!with_base.contains("cdn.example"));
 
-        let without_base = rewrite_dash_manifest(
-            "session",
-            &secret,
-            &manifest_url,
-            "<MPD><Period /></MPD>",
-            &mut resources,
-        );
+        let without_base =
+            rewrite_dash_manifest("session", &secret, &manifest_url, "<MPD><Period /></MPD>");
         assert!(without_base.starts_with("<MPD><BaseURL>/api/media/session/dash/base/"));
-        assert!(resources
-            .values()
-            .any(|resource| resource.url.host_str() == Some("cdn.example")));
-    }
-
-    #[test]
-    fn hls_rewrite_uses_opaque_resource_tokens() {
-        let manifest_url =
-            Url::parse("https://cdn.example/show/master.m3u8?secret=upstream").unwrap();
-        let secret = [9_u8; 32];
-        let mut resources = HashMap::new();
-        let rewritten = rewrite_hls_manifest(
-            "session",
-            &secret,
-            &manifest_url,
-            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin?token=hidden\"\nsegment.ts?token=hidden",
-            &mut resources,
-        );
-
-        assert!(rewritten.contains("/api/media/session/resource?token="));
-        assert!(!rewritten.contains("cdn.example"));
-        assert!(!rewritten.contains("token=hidden"));
-        assert_eq!(resources.len(), 2);
     }
 
     #[test]
@@ -2296,34 +2297,6 @@ mod tests {
             "https://cdn.example/show/segments/1.m4s"
         );
         assert!(resolve_dash_upstream(base, "https://attacker.example/1.m4s").is_err());
-    }
-
-    #[test]
-    fn dash_resources_preserve_signed_query_parameters() {
-        let base = Url::parse("https://cdn.example/show/manifest.mpd?manifest=1").unwrap();
-        let mut upstream = resolve_dash_upstream(base, "segments/1.m4s?segment=2").unwrap();
-        append_upstream_query(&mut upstream, Some("token=signed&expires=123"));
-        assert_eq!(
-            upstream.as_str(),
-            "https://cdn.example/show/segments/1.m4s?segment=2&token=signed&expires=123"
-        );
-    }
-
-    #[test]
-    fn media_resource_registry_evicts_the_oldest_entry_at_capacity() {
-        let secret = [4_u8; 32];
-        let mut resources = HashMap::new();
-        for index in 0..=MAX_MEDIA_RESOURCES {
-            let url = Url::parse(&format!("https://cdn.example/{index}.ts")).unwrap();
-            register_media_resource(&secret, &mut resources, &url);
-        }
-        assert_eq!(resources.len(), MAX_MEDIA_RESOURCES);
-        assert!(!resources
-            .values()
-            .any(|resource| resource.url.path() == "/0.ts"));
-        assert!(resources
-            .values()
-            .any(|resource| resource.url.path() == format!("/{MAX_MEDIA_RESOURCES}.ts")));
     }
 
     #[test]

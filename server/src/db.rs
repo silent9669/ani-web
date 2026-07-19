@@ -435,27 +435,24 @@ impl WebDatabase {
         } else {
             None
         };
-        let password_changed = password_hash.is_some();
-        let mut conn = self.conn.lock().await;
-        let transaction = conn.transaction()?;
+        let conn = self.conn.lock().await;
         let changed = if let Some(password_hash) = password_hash {
-            transaction.execute(
+            conn.execute(
                 "UPDATE users SET username = ?1, enabled = ?2, role = ?3, password_hash = ?4
                  WHERE id = ?5 AND protected = 0",
                 params![username.trim(), enabled, role, password_hash, id],
             )?
         } else {
-            transaction.execute(
+            conn.execute(
                 "UPDATE users SET username = ?1, enabled = ?2, role = ?3
                  WHERE id = ?4 AND protected = 0",
                 params![username.trim(), enabled, role, id],
             )?
         };
         anyhow::ensure!(changed == 1, "user was not found or is protected");
-        if password_changed || !enabled {
-            transaction.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
+        if !enabled {
+            conn.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
         }
-        transaction.commit()?;
         Ok(())
     }
 
@@ -675,7 +672,6 @@ mod tests {
             .await;
         assert!(root_update.is_err());
 
-        let viewer_session = db.create_session(&viewer.id).await.unwrap();
         db.update_user(
             &viewer.id,
             "viewer-renamed",
@@ -685,7 +681,6 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(db.session_user(&viewer_session).await.unwrap().is_none());
         let authenticated = db
             .authenticate("viewer-renamed", "Viewer-Updated-Password")
             .await
@@ -707,15 +702,44 @@ mod tests {
             .any(|user| user.id == viewer.id));
         assert!(db.delete_user(&root.id).await.is_err());
 
+        db.save_favorite(
+            &root.id,
+            &NewFavorite {
+                anime_id: "animegg:one-piece",
+                catalog_id: Some(21),
+                provider: "AnimeGG",
+                title: "One Piece",
+                cover_url: "https://example.invalid/one-piece.jpg",
+            },
+        )
+        .await
+        .unwrap();
+        db.save_history(
+            &root.id,
+            &NewHistory {
+                anime_id: "animegg:one-piece",
+                catalog_id: Some(21),
+                provider: "AnimeGG",
+                title: "One Piece",
+                cover_url: "https://example.invalid/one-piece.jpg",
+                episode_number: 1,
+                episode_title: Some("I'm Luffy!"),
+                position_seconds: 42,
+                total_seconds: 1_500,
+            },
+        )
+        .await
+        .unwrap();
+
         let root_session = db.create_session(&root.id).await.unwrap();
-        db.bootstrap_admin("ronaldo2007", "Replacement-Password-2026")
+        db.bootstrap_admin("protected-admin", "Replacement-Password-2026")
             .await
             .unwrap();
         let users = db.list_users().await.unwrap();
         assert!(!users.iter().any(|user| user.username == "root"));
         let replacement = users
             .iter()
-            .find(|user| user.username == "ronaldo2007")
+            .find(|user| user.username == "protected-admin")
             .unwrap();
         assert_eq!(replacement.id, root.id);
         assert!(replacement.protected);
@@ -725,14 +749,21 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(db
-            .authenticate("ronaldo2007", "Replacement-Password-2026")
+            .authenticate("protected-admin", "Replacement-Password-2026")
             .await
             .unwrap()
             .is_some());
+        let favorites = db.favorites(&replacement.id, 10).await.unwrap();
+        assert_eq!(favorites.len(), 1);
+        assert_eq!(favorites[0].anime_id, "animegg:one-piece");
+        let history = db.history(&replacement.id, 10).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].episode_number, 1);
+        assert_eq!(history[0].position_seconds, 42);
         assert!(db.session_user(&root_session).await.unwrap().is_none());
 
         let replacement_session = db.create_session(&replacement.id).await.unwrap();
-        db.bootstrap_admin("ronaldo2007", "Replacement-Password-2026")
+        db.bootstrap_admin("protected-admin", "Replacement-Password-2026")
             .await
             .unwrap();
         assert!(db

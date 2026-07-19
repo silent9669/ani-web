@@ -1,5 +1,5 @@
 [Unit]
-Description=Deploy the latest CI-approved ani-desk master commit
+Description=Deploy the latest CI-approved ani-web master commit
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 

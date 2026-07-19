@@ -60,7 +60,9 @@ Current live results:
 
 MovieBox is now enabled as a distinct English provider. It appears separately in
 the provider-first picker and does not merge its results into AllAnime or
-AnimeGG.
+AnimeGG. The adapter signs and authenticates independently against the `api4`,
+`api5`, and `api6` mirrors, so a regional endpoint timeout does not disable the
+provider.
 
 ## Sources not admitted
 

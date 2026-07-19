@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -63,6 +64,8 @@ jobs:
           bash -n deploy/homelab/bootstrap-host.sh
           bash -n deploy/homelab/namecheap-ddns.sh
           bash -n deploy/homelab/pull-deploy.sh
+          bash -n deploy/homelab/run-pull-deploy.sh
+          python tests/test_data_guard.py -v
           docker compose \
             --env-file deploy/homelab/.env.example \
             --file deploy/homelab/compose.yml \

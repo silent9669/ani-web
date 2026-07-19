@@ -1,7 +1,7 @@
 use super::{parse_episode_number, Anime, AnimeProvider, Episode, Language, StreamInfo, Subtitle};
 use aes::cipher::{KeyIvInit, StreamCipher};
 use aes_gcm::{
-    aead::{Aead, KeyInit as _},
+    aead::{Aead, KeyInit as AeadKeyInit},
     Aes256Gcm, Nonce,
 };
 use anyhow::{Context, Result};
@@ -10,64 +10,31 @@ use base64::Engine as _;
 use regex::Regex;
 use reqwest::header::{self, HeaderMap};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 const ALLANIME_API: &str = "https://api.allanime.day/api";
 const ALLANIME_BASE: &str = "https://allanime.day";
 const ALLANIME_REFERRER: &str = "https://youtu-chan.com";
+const ALLANIME_CRYPTO_PAGE: &str = "https://mkissa.to/";
+const ALLANIME_CRYPTO_CDN: &str = "https://cdn.allanime.day/all/mk/_app/immutable/";
 const MP4UPLOAD_REFERRER: &str = "https://www.mp4upload.com";
-const ALLANIME_QUERY_HASH: &str =
-    "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
-const DEFAULT_ALLANIME_KEY_HEX: &str =
-    "cf4777b5778aeadc9449e12769ea545d00c43cd8ff65d482364586cde204f359";
-const DEFAULT_ALLANIME_EPOCH: u64 = 4130;
-const DEFAULT_ALLANIME_BUILD_ID: &str = "41";
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const ALLANIME_FALLBACK_EPOCH: u64 = 4128;
+const ALLANIME_FALLBACK_MASK: &str =
+    "b1a9a4d051988f1b1b12dbb747439d9bd64b09ea17835600a7eaa4de87c1ad87";
+const ALLANIME_FALLBACK_PART_B: &str = "k7DLdv5SGiuEyGUtcncl5wQOR7r4aenLfDV3AOBKlAU=";
+const ALLANIME_FALLBACK_QUERY_HASH: &str =
+    "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
 
-#[derive(Debug, Clone)]
-struct AllAnimeCryptoProfile {
-    key: [u8; 32],
+#[derive(Clone)]
+struct AllAnimeCryptoState {
+    expires_at_ms: u64,
     epoch: u64,
-    build_id: String,
-}
-
-impl AllAnimeCryptoProfile {
-    fn from_environment() -> Result<Self> {
-        let key_hex = std::env::var("ANI_DESK_ALLANIME_KEY")
-            .unwrap_or_else(|_| DEFAULT_ALLANIME_KEY_HEX.to_string());
-        let key_bytes = decode_hex_32(&key_hex)
-            .context("ANI_DESK_ALLANIME_KEY must be a 64-character hexadecimal AES key")?;
-        let epoch = std::env::var("ANI_DESK_ALLANIME_EPOCH")
-            .ok()
-            .map(|value| value.parse::<u64>())
-            .transpose()
-            .context("ANI_DESK_ALLANIME_EPOCH must be an unsigned integer")?
-            .unwrap_or(DEFAULT_ALLANIME_EPOCH);
-        let build_id = std::env::var("ANI_DESK_ALLANIME_BUILD_ID")
-            .unwrap_or_else(|_| DEFAULT_ALLANIME_BUILD_ID.to_string());
-        anyhow::ensure!(
-            !build_id.trim().is_empty(),
-            "ANI_DESK_ALLANIME_BUILD_ID cannot be empty"
-        );
-
-        Ok(Self {
-            key: key_bytes,
-            epoch,
-            build_id,
-        })
-    }
-
-    fn defaults() -> Self {
-        Self {
-            key: decode_hex_32(DEFAULT_ALLANIME_KEY_HEX)
-                .expect("embedded AllAnime key must be valid"),
-            epoch: DEFAULT_ALLANIME_EPOCH,
-            build_id: DEFAULT_ALLANIME_BUILD_ID.to_string(),
-        }
-    }
+    key: [u8; 32],
+    query_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,7 +74,7 @@ pub struct AllAnimeProvider {
     client: reqwest::Client,
     insecure_client: reqwest::Client,
     verification_cookie: RwLock<Option<String>>,
-    crypto: AllAnimeCryptoProfile,
+    crypto: RwLock<Option<AllAnimeCryptoState>>,
 }
 
 impl Default for AllAnimeProvider {
@@ -145,10 +112,7 @@ impl AllAnimeProvider {
             client,
             insecure_client,
             verification_cookie: RwLock::new(None),
-            crypto: AllAnimeCryptoProfile::from_environment().unwrap_or_else(|error| {
-                tracing::warn!(%error, "invalid AllAnime crypto override; using embedded profile");
-                AllAnimeCryptoProfile::defaults()
-            }),
+            crypto: RwLock::new(None),
         }
     }
 
@@ -162,11 +126,272 @@ impl AllAnimeProvider {
         }
     }
 
-    pub fn decrypt_tobeparsed(encrypted: &str) -> Result<String> {
-        Self::decrypt_tobeparsed_with_key(encrypted, &AllAnimeCryptoProfile::defaults().key)
+    fn unix_time_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
     }
 
-    fn decrypt_tobeparsed_with_key(encrypted: &str, key: &[u8; 32]) -> Result<String> {
+    fn decode_hex_key(value: &str) -> Result<[u8; 32]> {
+        anyhow::ensure!(
+            value.len() == 64,
+            "AllAnime crypto mask has an invalid length"
+        );
+        let mut bytes = [0u8; 32];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+                .context("AllAnime crypto mask is not valid hexadecimal")?;
+        }
+        Ok(bytes)
+    }
+
+    fn derive_crypto_key(mask: &str, part_b: &str) -> Result<[u8; 32]> {
+        let mut key = Self::decode_hex_key(mask)?;
+        let secret = base64::engine::general_purpose::STANDARD
+            .decode(part_b)
+            .context("Failed to decode AllAnime crypto secret")?;
+        anyhow::ensure!(
+            secret.len() == key.len(),
+            "AllAnime crypto secret has an invalid length"
+        );
+        for (left, right) in key.iter_mut().zip(secret) {
+            *left ^= right;
+        }
+        Ok(key)
+    }
+
+    fn source_query_hash(chunk: &str) -> Option<String> {
+        let template_re = Regex::new(r"(?s)`([^`]*)`").ok()?;
+        let placeholder_re = Regex::new(r"\$\{([^}]+)\}").ok()?;
+        let mut query = template_re
+            .captures_iter(chunk)
+            .filter_map(|capture| capture.get(1).map(|matched| matched.as_str()))
+            .find(|template| template.contains("sourceUrls") && template.contains("episode("))?
+            .to_string();
+
+        for _ in 0..7 {
+            let placeholders = placeholder_re
+                .captures_iter(&query)
+                .filter_map(|capture| capture.get(1).map(|matched| matched.as_str().to_string()))
+                .collect::<Vec<_>>();
+            if placeholders.is_empty() {
+                return Some(format!("{:x}", Sha256::digest(query.as_bytes())));
+            }
+
+            for placeholder in placeholders {
+                let replacement = if let Some(function_name) = placeholder.strip_suffix("()") {
+                    let pattern = format!(
+                        r"(?s)\b{}\s*=\s*\w+\s*=>\s*\w+\s*\?\s*`[^`]*`\s*:\s*`([^`]*)`",
+                        regex::escape(function_name)
+                    );
+                    Regex::new(&pattern)
+                        .ok()?
+                        .captures(chunk)
+                        .and_then(|capture| capture.get(1))
+                        .map(|matched| matched.as_str().to_string())
+                        .unwrap_or_default()
+                } else {
+                    let pattern = format!(r"(?s)\b{}\s*=\s*`([^`]*)`", regex::escape(&placeholder));
+                    Regex::new(&pattern)
+                        .ok()?
+                        .captures(chunk)
+                        .and_then(|capture| capture.get(1))
+                        .map(|matched| matched.as_str().to_string())?
+                };
+                query = query.replace(&format!("${{{placeholder}}}"), &replacement);
+            }
+        }
+
+        (!query.contains("${")).then(|| format!("{:x}", Sha256::digest(query.as_bytes())))
+    }
+
+    fn fallback_crypto() -> Result<AllAnimeCryptoState> {
+        Ok(AllAnimeCryptoState {
+            expires_at_ms: Self::unix_time_ms() + 60 * 60 * 1000,
+            epoch: ALLANIME_FALLBACK_EPOCH,
+            key: Self::derive_crypto_key(ALLANIME_FALLBACK_MASK, ALLANIME_FALLBACK_PART_B)?,
+            query_hash: ALLANIME_FALLBACK_QUERY_HASH.to_string(),
+        })
+    }
+
+    async fn fetch_live_crypto(&self) -> Result<AllAnimeCryptoState> {
+        let html = self
+            .client
+            .get(ALLANIME_CRYPTO_PAGE)
+            .send()
+            .await
+            .context("Failed to fetch AllAnime crypto bootstrap page")?
+            .error_for_status()
+            .context("AllAnime crypto bootstrap page returned an error")?
+            .text()
+            .await
+            .context("Failed to read AllAnime crypto bootstrap page")?;
+
+        let bootstrap_re = Regex::new(r"(?s)window\.__aaCrypto\s*=\s*(\{.*?\})")?;
+        let bootstrap = bootstrap_re
+            .captures(&html)
+            .and_then(|capture| capture.get(1))
+            .context("AllAnime crypto bootstrap data was not found")?;
+        let bootstrap: serde_json::Value = serde_json::from_str(bootstrap.as_str())
+            .context("Failed to parse AllAnime crypto bootstrap data")?;
+        let part_b = bootstrap["partB"]
+            .as_str()
+            .context("AllAnime crypto bootstrap secret was missing")?;
+        let epoch = bootstrap["epoch"]
+            .as_u64()
+            .context("AllAnime crypto bootstrap epoch was missing")?;
+        let switch_at = bootstrap["switchAt"].as_u64().unwrap_or_default();
+        let grace_ms = bootstrap["graceMs"].as_u64().unwrap_or_default();
+
+        let app_re = Regex::new(r#"_app/immutable/(entry/app\.[^\"']+\.js)"#)?;
+        let app_path = app_re
+            .captures(&html)
+            .and_then(|capture| capture.get(1))
+            .context("AllAnime application bundle was not found")?
+            .as_str();
+        let app = self
+            .client
+            .get(format!("{ALLANIME_CRYPTO_CDN}{app_path}"))
+            .send()
+            .await
+            .context("Failed to fetch AllAnime application bundle")?
+            .error_for_status()
+            .context("AllAnime application bundle returned an error")?
+            .text()
+            .await
+            .context("Failed to read AllAnime application bundle")?;
+
+        let import_re = Regex::new(r#"(?:\.\./)?(chunks/[A-Za-z0-9_-]+\.js)"#)?;
+        let mask_re = Regex::new(r"[0-9a-f]{64}")?;
+        let mut visited = HashSet::new();
+        for chunk_path in import_re
+            .captures_iter(&app)
+            .filter_map(|capture| capture.get(1).map(|matched| matched.as_str()))
+        {
+            if !visited.insert(chunk_path) {
+                continue;
+            }
+            let chunk = self
+                .client
+                .get(format!("{ALLANIME_CRYPTO_CDN}{chunk_path}"))
+                .send()
+                .await
+                .context("Failed to fetch AllAnime crypto bundle")?
+                .error_for_status()
+                .context("AllAnime crypto bundle returned an error")?
+                .text()
+                .await
+                .context("Failed to read AllAnime crypto bundle")?;
+            if !chunk.contains("__aaCrypto") {
+                continue;
+            }
+
+            let masks = mask_re
+                .find_iter(&chunk)
+                .map(|matched| matched.as_str())
+                .collect::<Vec<_>>();
+            if masks.len() != 1 {
+                continue;
+            }
+
+            return Ok(AllAnimeCryptoState {
+                expires_at_ms: (switch_at + grace_ms).max(Self::unix_time_ms() + 60 * 60 * 1000),
+                epoch,
+                key: Self::derive_crypto_key(masks[0], part_b)?,
+                query_hash: Self::source_query_hash(&chunk)
+                    .unwrap_or_else(|| ALLANIME_FALLBACK_QUERY_HASH.to_string()),
+            });
+        }
+
+        anyhow::bail!("AllAnime crypto bundle could not be identified")
+    }
+
+    async fn current_crypto(&self) -> Result<AllAnimeCryptoState> {
+        let now = Self::unix_time_ms();
+        if let Some(cached) = self
+            .crypto
+            .read()
+            .await
+            .as_ref()
+            .filter(|cached| cached.expires_at_ms > now)
+            .cloned()
+        {
+            return Ok(cached);
+        }
+
+        let crypto = match self.fetch_live_crypto().await {
+            Ok(crypto) => {
+                tracing::debug!(
+                    epoch = crypto.epoch,
+                    query_hash = %crypto.query_hash,
+                    "AllAnime runtime crypto refreshed"
+                );
+                crypto
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "AllAnime runtime crypto unavailable; using fallback");
+                Self::fallback_crypto()?
+            }
+        };
+        *self.crypto.write().await = Some(crypto.clone());
+        Ok(crypto)
+    }
+
+    async fn build_source_request_crypto(&self) -> Result<(AllAnimeCryptoState, String)> {
+        let crypto = self.current_crypto().await?;
+        let timestamp = Self::unix_time_ms() / 300_000 * 300_000;
+        let iv_digest = Sha256::digest(
+            format!("{}:{}:{}", crypto.epoch, crypto.query_hash, timestamp).as_bytes(),
+        );
+        let mut iv = [0u8; 12];
+        iv.copy_from_slice(&iv_digest[..12]);
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "v": 1,
+            "ts": timestamp,
+            "epoch": crypto.epoch,
+            "qh": crypto.query_hash,
+        }))?;
+        let cipher = Aes256Gcm::new_from_slice(&crypto.key)
+            .map_err(|_| anyhow::anyhow!("AllAnime request crypto key was invalid"))?;
+        let encrypted = cipher
+            .encrypt(Nonce::from_slice(&iv), payload.as_ref())
+            .map_err(|_| anyhow::anyhow!("Failed to encrypt AllAnime request token"))?;
+        let mut token = Vec::with_capacity(1 + iv.len() + encrypted.len());
+        token.push(1);
+        token.extend_from_slice(&iv);
+        token.extend_from_slice(&encrypted);
+        Ok((
+            crypto,
+            base64::engine::general_purpose::STANDARD.encode(token),
+        ))
+    }
+
+    fn decrypt_source_payload(encrypted: &str, runtime_key: &[u8; 32]) -> Result<String> {
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encrypted)
+            .context("Failed to decode encrypted AllAnime source response")?;
+        anyhow::ensure!(
+            decoded.len() >= 29,
+            "Encrypted AllAnime source response was too short"
+        );
+        let nonce = Nonce::from_slice(&decoded[1..13]);
+        let static_key: [u8; 32] = Sha256::digest(b"Xot36i3lK3:v1").into();
+
+        for key in [runtime_key, &static_key] {
+            let cipher = Aes256Gcm::new_from_slice(key)
+                .map_err(|_| anyhow::anyhow!("AllAnime response crypto key was invalid"))?;
+            if let Ok(plain) = cipher.decrypt(nonce, &decoded[13..]) {
+                return String::from_utf8(plain)
+                    .context("AllAnime source response was not valid UTF-8");
+            }
+        }
+
+        Self::decrypt_tobeparsed(encrypted)
+            .context("AllAnime source response could not be decrypted")
+    }
+
+    pub fn decrypt_tobeparsed(encrypted: &str) -> Result<String> {
         let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encrypted)
             .context("Failed to decode base64 tobeparsed")?;
 
@@ -175,6 +400,12 @@ impl AllAnimeProvider {
         if decoded.len() < 29 {
             anyhow::bail!("Encrypted data too short");
         }
+
+        // Key = Sha256("Xot36i3lK3:v1")
+        let secret = "Xot36i3lK3:v1";
+        let mut hasher = Sha256::new();
+        hasher.update(secret);
+        let key = hasher.finalize();
 
         // Skip the first byte (decoded[0])
         // IV = bytes 1 to 13 (12 bytes) + counter "00000002"
@@ -189,46 +420,11 @@ impl AllAnimeProvider {
         let mut data = ciphertext.to_vec();
 
         type Aes256Ctr = ctr::Ctr128BE<aes::Aes256>;
-        let mut cipher = Aes256Ctr::new(key.into(), &iv.into());
+        let mut cipher = Aes256Ctr::new(&key, &iv.into());
         cipher.apply_keystream(&mut data);
 
         let decrypted = String::from_utf8(data).context("Failed to parse decrypted UTF-8")?;
         Ok(decrypted)
-    }
-
-    fn generate_aa_req(&self) -> Result<String> {
-        let timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("system time is before the Unix epoch")?
-            .as_millis() as u64;
-        self.generate_aa_req_at(timestamp_ms / 300_000 * 300_000)
-    }
-
-    fn generate_aa_req_at(&self, timestamp_ms: u64) -> Result<String> {
-        let iv_seed = format!(
-            "{}:{}:{}:{}",
-            self.crypto.epoch, self.crypto.build_id, ALLANIME_QUERY_HASH, timestamp_ms
-        );
-        let digest = Sha256::digest(iv_seed.as_bytes());
-        let iv = &digest[..12];
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "v": 1,
-            "ts": timestamp_ms,
-            "epoch": self.crypto.epoch,
-            "buildId": self.crypto.build_id,
-            "qh": ALLANIME_QUERY_HASH,
-        }))?;
-        let cipher = Aes256Gcm::new_from_slice(&self.crypto.key)
-            .context("failed to initialize AllAnime AES-GCM cipher")?;
-        let ciphertext_and_tag = cipher
-            .encrypt(Nonce::from_slice(iv), payload.as_slice())
-            .map_err(|_| anyhow::anyhow!("failed to encrypt AllAnime aaReq token"))?;
-
-        let mut token = Vec::with_capacity(1 + iv.len() + ciphertext_and_tag.len());
-        token.push(1);
-        token.extend_from_slice(iv);
-        token.extend_from_slice(&ciphertext_and_tag);
-        Ok(base64::engine::general_purpose::STANDARD.encode(token))
     }
 
     async fn graphql_query(
@@ -255,7 +451,7 @@ impl AllAnimeProvider {
         // Check if data is wrapped in tobeparsed
         if let Some(data) = response.get("data") {
             if let Some(tobeparsed) = data["tobeparsed"].as_str() {
-                let decrypted = Self::decrypt_tobeparsed_with_key(tobeparsed, &self.crypto.key)?;
+                let decrypted = Self::decrypt_tobeparsed(tobeparsed)?;
                 return serde_json::from_str(&decrypted).context("Failed to parse decrypted JSON");
             }
         }
@@ -456,7 +652,8 @@ impl AllAnimeProvider {
 
     fn source_priority() -> &'static [&'static str] {
         &[
-            "Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4", "Fm-Hls", "Fm-mp4", "Ok", "Sup", "Uni",
+            "Yt-mp4", "S-Mp4", "S-mp4", "Uv-mp4", "Ak", "Default", "Luf-Mp4", "Mp4", "Ss-Hls",
+            "Sl-mp4", "Fm-Hls", "Fm-mp4", "Ok", "Other", "Sup", "Uni",
         ]
     }
 
@@ -958,8 +1155,8 @@ impl AllAnimeProvider {
 
                 if content_type.contains("text/html") {
                     tracing::warn!(
-                        "AllAnime candidate probe resolved to HTML instead of media: {}",
-                        candidate.url
+                        host = %Self::url_host(&candidate.url),
+                        "AllAnime candidate probe resolved to HTML instead of media"
                     );
                     return false;
                 }
@@ -968,21 +1165,28 @@ impl AllAnimeProvider {
             }
             Ok(response) => {
                 tracing::warn!(
-                    "AllAnime candidate failed probe with status {}: {}",
-                    response.status(),
-                    candidate.url
+                    host = %Self::url_host(&candidate.url),
+                    status = %response.status(),
+                    "AllAnime candidate failed probe"
                 );
                 false
             }
             Err(err) => {
                 tracing::warn!(
-                    "AllAnime candidate probe failed: {}: {}",
-                    candidate.url,
-                    err
+                    host = %Self::url_host(&candidate.url),
+                    error = %err,
+                    "AllAnime candidate probe failed"
                 );
                 false
             }
         }
+    }
+
+    fn url_host(value: &str) -> String {
+        url::Url::parse(value)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .unwrap_or_else(|| "unknown-host".to_string())
     }
 }
 
@@ -1153,45 +1357,60 @@ impl AnimeProvider for AllAnimeProvider {
             "episodeString": episode_number
         });
 
-        let extensions = serde_json::json!({
-            "persistedQuery": {
-                "version": 1,
-                "sha256Hash": ALLANIME_QUERY_HASH
-            },
-            "aaReq": self.generate_aa_req()?
-        });
-
-        let encoded_vars = url::form_urlencoded::byte_serialize(variables.to_string().as_bytes())
-            .collect::<String>();
-        let encoded_ext = url::form_urlencoded::byte_serialize(extensions.to_string().as_bytes())
-            .collect::<String>();
-
-        let api_url = format!(
-            "{}?variables={}&extensions={}",
-            ALLANIME_API, encoded_vars, encoded_ext
-        );
-
-        let request = self
-            .with_verification_cookie(self.client.get(&api_url))
-            .await;
-        let response_text = request
-            .header("Origin", ALLANIME_REFERRER)
-            .header("x-build-id", &self.crypto.build_id)
-            .send()
-            .await
-            .context("GET GraphQL request failed")?
-            .text()
-            .await
-            .context("Failed to get response text")?;
-
-        let response: serde_json::Value = serde_json::from_str(&response_text)
-            .context("Failed to parse GraphQL response as JSON")?;
-
-        if response.to_string().contains("AA_CRYPTO_MISSING") {
-            anyhow::bail!(
-                "PROVIDER_CRYPTO_OUTDATED: AllAnime rejected the request token; refresh ANI_DESK_ALLANIME_KEY, ANI_DESK_ALLANIME_EPOCH, and ANI_DESK_ALLANIME_BUILD_ID"
+        let mut source_response = None;
+        let mut response_key = None;
+        for attempt in 0..2 {
+            let (crypto, aa_request) = self.build_source_request_crypto().await?;
+            let extensions = serde_json::json!({
+                "persistedQuery": {
+                    "version": 1,
+                    "sha256Hash": crypto.query_hash
+                },
+                "aaReq": aa_request
+            });
+            let encoded_vars =
+                url::form_urlencoded::byte_serialize(variables.to_string().as_bytes())
+                    .collect::<String>();
+            let encoded_ext =
+                url::form_urlencoded::byte_serialize(extensions.to_string().as_bytes())
+                    .collect::<String>();
+            let api_url = format!(
+                "{}?variables={}&extensions={}",
+                ALLANIME_API, encoded_vars, encoded_ext
             );
+            let request = self
+                .with_verification_cookie(self.client.get(&api_url))
+                .await;
+            let response: serde_json::Value = request
+                .header("Origin", ALLANIME_REFERRER)
+                .send()
+                .await
+                .context("AllAnime source GraphQL request failed")?
+                .json()
+                .await
+                .context("Failed to parse AllAnime source response")?;
+            let crypto_error = response
+                .get("errors")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|errors| {
+                    errors.iter().any(|error| {
+                        error["message"]
+                            .as_str()
+                            .is_some_and(|message| message.starts_with("AA_CRYPTO_"))
+                    })
+                });
+            if crypto_error && attempt == 0 {
+                *self.crypto.write().await = None;
+                continue;
+            }
+
+            response_key = Some(crypto.key);
+            source_response = Some(response);
+            break;
         }
+        let response = source_response.context("AllAnime source request returned no response")?;
+        let response_key =
+            response_key.context("AllAnime source request returned no crypto key")?;
 
         // Check if data is wrapped in tobeparsed
         let final_json = match response
@@ -1200,7 +1419,7 @@ impl AnimeProvider for AllAnimeProvider {
             .and_then(|t| t.as_str())
         {
             Some(tobeparsed) => {
-                let decrypted = Self::decrypt_tobeparsed_with_key(tobeparsed, &self.crypto.key)?;
+                let decrypted = Self::decrypt_source_payload(tobeparsed, &response_key)?;
                 serde_json::from_str(&decrypted).context("Failed to parse decrypted JSON")?
             }
             None => response,
@@ -1222,8 +1441,48 @@ impl AnimeProvider for AllAnimeProvider {
         } else {
             &final_json["episode"]
         };
+        let root_keys = final_json
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let data_keys = final_json
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let graphql_errors = final_json
+            .get("errors")
+            .and_then(serde_json::Value::as_array)
+            .map(|errors| {
+                errors
+                    .iter()
+                    .filter_map(|error| error["message"].as_str())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        tracing::debug!(
+            root_keys = ?root_keys,
+            data_keys = ?data_keys,
+            graphql_errors = ?graphql_errors,
+            episode_is_object = episode.is_object(),
+            source_urls_is_array = episode["sourceUrls"].is_array(),
+            anime_id,
+            episode_number,
+            "AllAnime episode response shape"
+        );
 
         if let Some(source_urls) = episode["sourceUrls"].as_array() {
+            let available_sources = source_urls
+                .iter()
+                .filter_map(|source| source["sourceName"].as_str())
+                .collect::<Vec<_>>();
+            tracing::debug!(
+                sources = ?available_sources,
+                anime_id,
+                episode_number,
+                "AllAnime episode sources received"
+            );
+
             for &priority_name in Self::source_priority() {
                 let Some(source) = source_urls
                     .iter()
@@ -1309,16 +1568,6 @@ impl AnimeProvider for AllAnimeProvider {
         self.get_stream_url(&episode.id).await?;
         Ok(())
     }
-}
-
-fn decode_hex_32(value: &str) -> Result<[u8; 32]> {
-    anyhow::ensure!(value.len() == 64, "expected 64 hexadecimal characters");
-    let mut bytes = [0u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-        let pair = std::str::from_utf8(pair).context("AES key was not valid UTF-8")?;
-        bytes[index] = u8::from_str_radix(pair, 16).context("AES key contained non-hex data")?;
-    }
-    Ok(bytes)
 }
 
 fn normalized_title(value: &str) -> String {
@@ -1450,16 +1699,43 @@ https://cdn.example/720/index.m3u8
     }
 
     #[test]
-    fn test_source_priority_matches_latest_ani_cli_active_sources() {
+    fn test_source_priority_covers_current_allanime_sources() {
         let priority = AllAnimeProvider::source_priority();
 
-        assert_eq!(
-            &priority[..5],
-            ["Default", "Luf-Mp4", "Yt-mp4", "S-mp4", "Mp4"]
-        );
+        assert_eq!(&priority[..5], ["Yt-mp4", "S-Mp4", "S-mp4", "Uv-mp4", "Ak"]);
+        assert!(priority.contains(&"Default"));
         assert!(priority.contains(&"Fm-Hls"));
         assert!(priority.contains(&"Fm-mp4"));
         assert!(priority.contains(&"Luf-Mp4"));
+    }
+
+    #[test]
+    fn test_source_query_hash_resolves_minified_fragments() {
+        let chunk = r#"const a=`fragment SourceFields on SourceUrl { sourceUrl sourceName }`,b=e=>e?`unused`:`episodeString`,c=`query($showId:String!){episode(showId:$showId){${a} ${b()}} sourceUrls}`;"#;
+        let hash = AllAnimeProvider::source_query_hash(chunk).expect("query hash");
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|character| character.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_decrypt_source_payload_aes_gcm_fixture() {
+        let key = [7u8; 32];
+        let iv = [3u8; 12];
+        let plain = br#"{"episode":{"sourceUrls":[]}}"#;
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let encrypted = cipher
+            .encrypt(Nonce::from_slice(&iv), plain.as_ref())
+            .unwrap();
+        let mut payload = vec![1];
+        payload.extend_from_slice(&iv);
+        payload.extend_from_slice(&encrypted);
+
+        let decoded = AllAnimeProvider::decrypt_source_payload(
+            &base64::engine::general_purpose::STANDARD.encode(payload),
+            &key,
+        )
+        .unwrap();
+        assert_eq!(decoded.as_bytes(), plain);
     }
 
     #[test]
@@ -1566,31 +1842,6 @@ https://cdn.example/720/index.m3u8
         let _decrypted = AllAnimeProvider::decrypt_tobeparsed(encrypted_payload);
         // Note: Decryption will likely fail due to truncated payload in this test case,
         // but we fix the syntax to allow compilation.
-    }
-
-    #[test]
-    fn aa_req_token_contains_current_profile_and_rounded_timestamp() {
-        let mut provider = AllAnimeProvider::new();
-        provider.crypto.build_id = "custom\"build\\id\nnext".to_string();
-        let timestamp_ms = 1_720_000_200_000;
-        let token = provider.generate_aa_req_at(timestamp_ms).unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(token)
-            .unwrap();
-
-        assert_eq!(decoded[0], 1);
-        let iv = &decoded[1..13];
-        let cipher = Aes256Gcm::new_from_slice(&provider.crypto.key).unwrap();
-        let plaintext = cipher
-            .decrypt(Nonce::from_slice(iv), &decoded[13..])
-            .unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&plaintext).unwrap();
-
-        assert_eq!(payload["v"], 1);
-        assert_eq!(payload["ts"], timestamp_ms);
-        assert_eq!(payload["epoch"], provider.crypto.epoch);
-        assert_eq!(payload["buildId"], provider.crypto.build_id);
-        assert_eq!(payload["qh"], ALLANIME_QUERY_HASH);
     }
 
     #[tokio::test]

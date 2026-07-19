@@ -49,9 +49,6 @@ function makeFavicon(sourceImage) {
     throw new Error(`${inputPath} does not contain visible artwork.`);
   }
 
-  // Favicons are displayed against browser-controlled tab colours. Keep the
-  // ani-desk mark on its original black field so it stays recognisable in both
-  // light and dark browser chrome instead of becoming a floating red outline.
   const target = Buffer.alloc(iconSize * iconSize * 4);
   for (let index = 0; index < target.length; index += 4) {
     target[index] = background.r;
@@ -76,18 +73,13 @@ function makeFavicon(sourceImage) {
         Math.abs(sourceImage.rgba[sourceIndex + 1] - background.g) +
         Math.abs(sourceImage.rgba[sourceIndex + 2] - background.b);
       const backgroundAlpha = Math.max(0, Math.min(1, (distance - 24) / 44));
-      const alpha = Math.round(sourceImage.rgba[sourceIndex + 3] * backgroundAlpha);
+      const alpha = sourceImage.rgba[sourceIndex + 3] / 255 * backgroundAlpha;
+      if (alpha === 0) continue;
+
       const targetIndex = ((top + y) * iconSize + left + x) * 4;
-      const foregroundAlpha = alpha / 255;
-      target[targetIndex] = Math.round(
-        sourceImage.rgba[sourceIndex] * foregroundAlpha + target[targetIndex] * (1 - foregroundAlpha),
-      );
-      target[targetIndex + 1] = Math.round(
-        sourceImage.rgba[sourceIndex + 1] * foregroundAlpha + target[targetIndex + 1] * (1 - foregroundAlpha),
-      );
-      target[targetIndex + 2] = Math.round(
-        sourceImage.rgba[sourceIndex + 2] * foregroundAlpha + target[targetIndex + 2] * (1 - foregroundAlpha),
-      );
+      target[targetIndex] = Math.round(sourceImage.rgba[sourceIndex] * alpha + target[targetIndex] * (1 - alpha));
+      target[targetIndex + 1] = Math.round(sourceImage.rgba[sourceIndex + 1] * alpha + target[targetIndex + 1] * (1 - alpha));
+      target[targetIndex + 2] = Math.round(sourceImage.rgba[sourceIndex + 2] * alpha + target[targetIndex + 2] * (1 - alpha));
       target[targetIndex + 3] = 255;
     }
   }

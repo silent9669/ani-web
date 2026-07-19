@@ -54,32 +54,6 @@ impl KkphimProvider {
             ))
         }
     }
-
-    fn plain_text(value: &str) -> Option<String> {
-        let mut text = String::with_capacity(value.len());
-        let mut inside_tag = false;
-        for character in value.chars() {
-            match character {
-                '<' => inside_tag = true,
-                '>' => {
-                    inside_tag = false;
-                    text.push(' ');
-                }
-                _ if !inside_tag => text.push(character),
-                _ => {}
-            }
-        }
-
-        let decoded = text
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">");
-        let normalized = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
-        (!normalized.is_empty()).then_some(normalized)
-    }
 }
 
 #[async_trait]
@@ -160,7 +134,7 @@ impl AnimeProvider for KkphimProvider {
                             banner_url: None,
                             language: Language::Vietnamese,
                             total_episodes: episode_count,
-                            synopsis: item["content"].as_str().and_then(Self::plain_text),
+                            synopsis: item["content"].as_str().map(|s| s.to_string()),
                         });
                     }
                 }
@@ -216,7 +190,7 @@ impl AnimeProvider for KkphimProvider {
             banner_url,
             language: Language::Vietnamese,
             total_episodes,
-            synopsis: item["content"].as_str().and_then(Self::plain_text),
+            synopsis: item["content"].as_str().map(|s| s.to_string()),
         }))
     }
 
@@ -488,21 +462,5 @@ impl AnimeProvider for KkphimProvider {
             qualities,
             headers,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::KkphimProvider;
-
-    #[test]
-    fn synopsis_is_plain_normalized_text() {
-        assert_eq!(
-            KkphimProvider::plain_text(
-                "<p>Khi một cậu bé&nbsp;mất tích, <strong>gia đình</strong> tìm kiếm &amp; chờ đợi.</p>",
-            ),
-            Some("Khi một cậu bé mất tích, gia đình tìm kiếm & chờ đợi.".to_string())
-        );
-        assert_eq!(KkphimProvider::plain_text("<p> </p>"), None);
     }
 }
