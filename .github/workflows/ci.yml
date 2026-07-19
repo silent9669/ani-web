@@ -63,8 +63,6 @@ jobs:
         run: |
           bash -n deploy/homelab/bootstrap-host.sh
           bash -n deploy/homelab/namecheap-ddns.sh
-          bash -n deploy/homelab/pull-deploy.sh
-          bash -n deploy/homelab/run-pull-deploy.sh
           python tests/test_data_guard.py -v
           docker compose \
             --env-file deploy/homelab/.env.example \
@@ -86,7 +84,7 @@ jobs:
           scripts/smoke-web-server.sh
 
   browser-e2e:
-    name: Browser E2E (desktop + mobile)
+    name: Browser E2E (desktop + mobile + TV)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -1,33 +1,29 @@
-<div align="center">
-  <img src="logo_curved.png" alt="ani-desk logo" width="128" style="border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-</div>
+# ani-web
 
-## Installation
+Private family anime streaming for desktop, mobile, and TV browsers.
 
-### macOS
+**Open the web app:** [ani.dangphuc.me](https://ani.dangphuc.me)
 
-Install with Homebrew:
+![ani-web desktop home](docs/images/web-home-desktop.png)
 
-```bash
-brew install --cask silent9669/ani-desk/ani-desk
-```
+## Use ani-web
 
-Or download the `.dmg` from [GitHub Releases](https://github.com/silent9669/ani-desk/releases/latest). If macOS says the app is damaged, run:
+1. Open the web app and sign in with an account created by the administrator.
+2. Search for a title from Home.
+3. Choose English or Vietnamese, then select a provider. Your search stays in place when you switch providers.
+4. Open a result, choose an episode, and press **Watch**.
+5. Use **My List** to save titles. Watch progress follows your account across signed-in browsers.
 
-```bash
-xattr -cr /Applications/ani-desk.app
-```
+## Mobile browser
 
-### Windows
+Search results, title details, episode selection, and playback adapt to a phone-sized screen.
 
-Download the `.msi` or `.exe` installer from [GitHub Releases](https://github.com/silent9669/ani-desk/releases/latest), then open it and follow the installer.
+<p align="center">
+  <img src="docs/images/web-search-mobile.png" alt="ani-web provider search on a mobile browser" width="390">
+</p>
 
-### Linux
+## TV browser
 
-Download the `.AppImage`, `.deb`, or `.rpm` package from [GitHub Releases](https://github.com/silent9669/ani-desk/releases/latest), then install it with your system's package manager.
+Choose **Settings → Interface size → TV / remote**. Use the arrow keys on a remote or keyboard to move focus and press **OK/Enter** to select.
 
-## Web app
-
-The responsive hosted edition is available at [ani-desk.up.railway.app](https://ani-desk.up.railway.app). Sign in with an account created by the ani-desk administrator. My List and watch progress are private to each account; browser downloads are saved through the browser's normal Downloads flow.
-
-The native app keeps its own Apple-style offline library under `Downloads/ani-desk`, with play, reveal, missing-file detection, storage totals, and guarded deletion.
+![ani-web TV and remote layout](docs/images/web-home-tv.png)

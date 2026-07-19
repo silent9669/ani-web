@@ -40,14 +40,19 @@ __pycache__/
 .githooks/
 .opencode/
 .ruff_cache/
-.venv/
-.venv-e2e/
+.venv*/
 .playwright-browsers/
 .pytest_cache/
-.hallmark/concepts/
-.hallmark/qa/
-.hallmark/log.json
-.hallmark/preflight.json
+.mypy_cache/
+.coverage
+coverage/
+htmlcov/
+playwright-report/
+test-results/
+.hallmark/
+*.log
+*.pid
+*.tmp
 AGENTS.md
 
 daytona
