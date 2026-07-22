@@ -3492,7 +3492,12 @@ function VideoPlayer({
             }
           });
         }).catch((loadError) => {
-          if (!disposed) setError(`The HLS player could not start (${String(loadError)}).`);
+          if (disposed) return;
+          if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            startNativeHls();
+          } else {
+            setError(`The HLS player could not start (${String(loadError)}).`);
+          }
         });
       }
     } else {
