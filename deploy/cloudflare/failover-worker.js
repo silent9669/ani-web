@@ -6,13 +6,13 @@ export default {
   async fetch(request) {
     try {
       const originResponse = await fetch(request, {
+        cache: "no-store",
         redirect: "manual",
         signal: AbortSignal.timeout(ORIGIN_TIMEOUT_MS),
-        cf: { cacheTtl: 0, cacheEverything: false },
       });
 
       if (originResponse.status < 500) {
-        return withMode(originResponse, "app");
+        return withMode(originResponse, "app", true);
       }
     } catch {
       // Network failure and timeout both select the independent fallback.
@@ -66,7 +66,11 @@ async function maintenanceResponse(request) {
     });
   }
 
-  return withMode(fallbackResponse, "maintenance", url.pathname === "/status.json" || isNavigation);
+  return withMode(
+    fallbackResponse,
+    "maintenance",
+    url.pathname === "/" || url.pathname === "/status.json" || isNavigation,
+  );
 }
 
 function withMode(response, mode, noStore = false) {
