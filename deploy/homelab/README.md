@@ -32,6 +32,24 @@ the new version changed or damaged persistent state.
 
 Never commit `.env`, database files, Caddy certificates, or backup archives.
 
+## Dynamic DNS after Cloudflare cutover
+
+When `dangphuc.me` is delegated to Cloudflare, Namecheap Dynamic DNS no longer
+controls the authoritative record. Install the Cloudflare updater and its units:
+
+```sh
+sudo install -m 0755 deploy/homelab/cloudflare-ddns.sh /usr/local/sbin/cloudflare-ddns
+sudo install -m 0644 deploy/homelab/ani-desk-cloudflare-ddns.service /etc/systemd/system/
+sudo install -m 0644 deploy/homelab/ani-desk-cloudflare-ddns.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ani-desk-cloudflare-ddns.timer
+sudo systemctl start ani-desk-cloudflare-ddns.service
+```
+
+Create `/etc/ani-desk-cloudflare-ddns.env` with mode `0600`; the required values
+and least-privilege token scope are documented in `deploy/cloudflare/README.md`.
+Confirm the new service succeeds before disabling `ani-desk-ddns.timer`.
+
 ### User-data preservation contract
 
 The Compose service bind-mounts `${ANI_DESK_DATA_PATH:-/srv/ani-desk/data}` at

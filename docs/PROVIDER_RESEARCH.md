@@ -121,6 +121,6 @@ through stream resolution rather than admitted on search results alone:
 HiAnime remains a non-certified stub. Its current third-party implementations
 depend on scraping and rapidly changing upstream tokens, so it is not exposed
 until the native adapter can independently pass search, episode, source, and
-media-byte checks. The enabled matrix therefore remains three English sources
-(AllAnime, MovieBox, AnimeGG) and three Vietnamese sources (KKPhim, OPhim,
-Niniyo).
+media-byte checks. The default-enabled matrix is one English source (MovieBox)
+and three Vietnamese sources (KKPhim, OPhim, Niniyo). AllAnime and AnimeGG stay
+implemented but opt-in until their live playback paths pass certification.

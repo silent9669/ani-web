@@ -63,6 +63,7 @@ jobs:
         run: |
           bash -n deploy/homelab/bootstrap-host.sh
           bash -n deploy/homelab/namecheap-ddns.sh
+          bash -n deploy/homelab/cloudflare-ddns.sh
           python tests/test_data_guard.py -v
           docker compose \
             --env-file deploy/homelab/.env.example \

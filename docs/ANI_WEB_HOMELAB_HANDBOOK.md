@@ -80,7 +80,7 @@ The main runtime pieces are:
 | `catalog.db` | AniList metadata/cache | yes, but rebuildable |
 | provider adapters | search, episodes, streams, health | external upstream |
 | manual deployment workflow | reviewed SHA, backup, rebuild, verification | operator runbook |
-| Namecheap DDNS timer | keep the public hostname on the current IP | secret file |
+| Cloudflare DDNS timer | keep the public hostname on the current IP | secret file |
 
 # Quick command card
 
@@ -384,8 +384,8 @@ cat /srv/ani-desk/state/data-after.json
 DDNS activity:
 
 ```sh
-systemctl status ani-desk-ddns.timer --no-pager
-journalctl -u ani-desk-ddns.service -n 100 --no-pager
+systemctl status ani-desk-cloudflare-ddns.timer --no-pager
+journalctl -u ani-desk-cloudflare-ddns.service -n 100 --no-pager
 ```
 
 Logs must not contain passwords, cookies, authorization headers, DDNS tokens,
@@ -406,11 +406,12 @@ through `/api/providers/health`. Interpret states separately:
 
 The current certified default set is:
 
-- English: AllAnime, MovieBox, and AnimeGG;
+- English: MovieBox;
 - Vietnamese: KKPhim, OPhim, and Niniyo.
 
-HiAnime remains disabled because direct playback is not certified. AllAnime stays visible with
-its user-controlled verification path when anti-bot checks block direct access.
+HiAnime remains disabled because direct playback is not certified. AllAnime and
+AnimeGG remain available as opt-in adapters, but are disabled by default until
+their live playback paths pass certification again.
 
 Provider health is a snapshot rather than a permanent disable flag. The web app
 still attempts an explicit user-selected search when a source advertises search

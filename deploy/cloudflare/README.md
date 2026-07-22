@@ -25,6 +25,22 @@ account credentials to GitHub Pages.
 3. Create a Worker from `failover-worker.js`.
 4. Add the Worker Route `ani.dangphuc.me/*` for the `dangphuc.me` zone.
 
+Moving the authoritative nameservers disables Namecheap Dynamic DNS. Install
+`deploy/homelab/cloudflare-ddns.sh` as `/usr/local/sbin/cloudflare-ddns`, install
+the matching service and timer units, and store these values with mode `0600`
+in `/etc/ani-desk-cloudflare-ddns.env`:
+
+```sh
+CLOUDFLARE_API_TOKEN=RESTRICTED_DNS_EDIT_TOKEN
+CLOUDFLARE_ZONE_ID=ZONE_ID
+CLOUDFLARE_DNS_RECORD_ID=ANI_A_RECORD_ID
+CLOUDFLARE_DNS_NAME=ani.dangphuc.me
+```
+
+The token needs only Zone DNS Edit permission for `dangphuc.me`. Run the new
+service successfully before disabling `ani-desk-ddns.timer`. Keep the old unit
+installed but disabled so rolling the nameservers back to Namecheap is quick.
+
 Do not configure `ani.dangphuc.me` as a Worker Custom Domain: this deployment
 has a real external origin and therefore uses a Worker Route.
 
@@ -41,5 +57,7 @@ During a controlled origin stop, `/` must return the maintenance page with
 `X-Ani-Desk-Mode: maintenance`, while `/api/health` returns JSON `503` with the
 same header. Restart the origin and confirm the header returns to `app`.
 
-Rollback requires only removing the Worker Route; the proxied DNS record then
-continues directly to the same homelab origin through Cloudflare.
+Worker-only rollback requires removing the Worker Route; the proxied DNS record
+then continues directly to the same homelab origin through Cloudflare. A full
+DNS rollback requires restoring Namecheap BasicDNS nameservers, disabling the
+Cloudflare DDNS timer, and re-enabling the Namecheap DDNS timer.
