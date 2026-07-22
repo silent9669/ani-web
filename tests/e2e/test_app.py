@@ -1032,6 +1032,25 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     assert safe_zone["right"] < safe_zone["midpoint"]
     assert safe_zone["titleSize"] <= 24
 
+
+def test_t3_chromium_hls_uses_media_source_instead_of_native_m3u8(mocked_page):
+    mocked_page.locator(".hero-search-trigger").click()
+    mocked_page.locator(".search-input-shell input").fill("Naruto")
+    mocked_page.wait_for_selector(".search-result")
+    mocked_page.locator(".search-result").first.click()
+    mocked_page.locator(".detail-actions button.primary").click()
+    mocked_page.wait_for_selector(".episode-list-row")
+    mocked_page.locator(".episode-list-row").first.click()
+
+    mocked_page.wait_for_function("""() => {
+        const video = document.querySelector('video');
+        return video?.currentSrc.startsWith('blob:');
+    }""")
+    current_src = mocked_page.locator("video").evaluate("video => video.currentSrc")
+    assert current_src.startswith("blob:")
+    assert not current_src.endswith(".m3u8")
+
+
 def test_t3_aniskip_is_on_by_default_and_persists(mocked_page):
     settings_nav = mocked_page.get_by_label("Primary navigation").get_by_role("button", name="Settings")
     settings_nav.click()
