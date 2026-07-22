@@ -1217,46 +1217,63 @@ impl AnimeProvider for AllAnimeProvider {
     async fn search(&self, query: &str) -> Result<Vec<Anime>> {
         let search_gql = r#"query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name availableEpisodes thumbnail __typename } }}"#;
 
-        let variables = serde_json::json!({
-            "search": {
-                "allowAdult": false,
-                "allowUnknown": false,
-                "query": query
-            },
-            "limit": 40,
-            "page": 1,
-            "translationType": "sub",
-            "countryOrigin": "ALL"
-        });
-
-        let response = self.graphql_query(search_gql, variables).await?;
         let mut results = Vec::new();
+        let provider_queries = vec![query];
 
-        let shows = if let Some(data) = response.get("data") {
-            &data["shows"]
-        } else {
-            &response["shows"]
-        };
+        for provider_query in provider_queries {
+            let variables = serde_json::json!({
+                "search": {
+                    "allowAdult": false,
+                    "allowUnknown": false,
+                    "query": provider_query
+                },
+                "limit": 40,
+                "page": 1,
+                "translationType": "sub",
+                "countryOrigin": "ALL"
+            });
+            let response = self.graphql_query(search_gql, variables).await?;
+            let shows = if let Some(data) = response.get("data") {
+                &data["shows"]
+            } else {
+                &response["shows"]
+            };
 
-        if let Some(edges) = shows["edges"].as_array() {
-            for edge in edges {
-                let id = edge["_id"].as_str().unwrap_or_default().to_string();
-                let name = edge["name"].as_str().unwrap_or_default().to_string();
-                let thumbnail = edge["thumbnail"].as_str().unwrap_or_default().to_string();
-                let episodes = edge["availableEpisodes"]["sub"].as_u64().map(|n| n as u32);
+            if let Some(edges) = shows["edges"].as_array() {
+                for edge in edges {
+                    let id = edge["_id"].as_str().unwrap_or_default().to_string();
+                    let name = canonical_allanime_title(edge["name"].as_str().unwrap_or_default());
+                    let thumbnail = edge["thumbnail"].as_str().unwrap_or_default().to_string();
+                    let episodes = edge["availableEpisodes"]["sub"].as_u64().map(|n| n as u32);
 
-                if !id.is_empty() && !name.is_empty() {
-                    results.push(Anime {
-                        id,
-                        provider: "AllAnime".to_string(),
-                        title: name,
-                        cover_url: thumbnail,
-                        banner_url: None,
-                        language: Language::English,
-                        total_episodes: episodes,
-                        synopsis: None,
-                    });
+                    if !id.is_empty()
+                        && !name.is_empty()
+                        && !results.iter().any(|anime: &Anime| anime.id == id)
+                    {
+                        results.push(Anime {
+                            id,
+                            provider: "AllAnime".to_string(),
+                            title: name,
+                            cover_url: thumbnail,
+                            banner_url: None,
+                            language: Language::English,
+                            total_episodes: episodes,
+                            synopsis: None,
+                        });
+                    }
                 }
+            }
+        }
+
+        if normalized_title(query) == "one piece"
+            && !results
+                .iter()
+                .any(|anime| anime.title == "One Piece" && anime.total_episodes.unwrap_or(0) > 100)
+        {
+            // The upstream search index currently omits its abbreviated `1P`
+            // record even though direct details and playback remain healthy.
+            if let Some(anime) = self.get_anime_details("ReooPAxPMsHM4KPMY").await? {
+                results.push(anime);
             }
         }
 
@@ -1282,7 +1299,7 @@ impl AnimeProvider for AllAnimeProvider {
         };
 
         let id = show["_id"].as_str().unwrap_or(anime_id).to_string();
-        let title = show["name"].as_str().unwrap_or_default().to_string();
+        let title = canonical_allanime_title(show["name"].as_str().unwrap_or_default());
         if title.is_empty() {
             return Ok(None);
         }
@@ -1588,6 +1605,18 @@ fn normalized_title(value: &str) -> String {
         .join(" ")
 }
 
+fn canonical_allanime_title(value: &str) -> String {
+    // AllAnime currently abbreviates its main One Piece entry as `1P` while
+    // still returning the complete 1,100+ episode catalogue. Normalize that
+    // provider-owned alias so search ranking and the user-visible title select
+    // the playable series instead of a one-episode special.
+    if value.trim().eq_ignore_ascii_case("1P") {
+        "One Piece".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 fn allanime_search_score(query: &str, anime: &Anime) -> i32 {
     let query = normalized_title(query);
     let title = normalized_title(&anime.title);
@@ -1628,6 +1657,12 @@ mod tests {
         let encoded = "79677a7a78";
         let decoded = AllAnimeProvider::decode_provider_id(encoded);
         assert!(!decoded.is_empty());
+    }
+
+    #[test]
+    fn normalizes_current_one_piece_provider_alias() {
+        assert_eq!(canonical_allanime_title("1P"), "One Piece");
+        assert_eq!(canonical_allanime_title("Your Name"), "Your Name");
     }
 
     #[test]

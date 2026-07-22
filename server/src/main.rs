@@ -8,6 +8,7 @@ use ani_desk_core::{
     db::Database,
     metadata::MetadataCache,
     providers::{Anime, AnimeProvider, Language, ProviderRegistry, StreamInfo},
+    skip_times::{fetch_skip_times, SkipTime},
 };
 use anyhow::{Context, Result};
 use axum::{
@@ -217,6 +218,13 @@ struct PlaybackInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SkipTimesInput {
+    catalog_id: i64,
+    episode_number: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AnimeInput {
     id: String,
     catalog_id: Option<i64>,
@@ -391,6 +399,7 @@ async fn main() -> Result<()> {
         .route("/anime/details", post(anime_details))
         .route("/anime/episodes", post(episodes))
         .route("/playback", post(playback))
+        .route("/skip-times", post(skip_times))
         .route("/media/:id", get(media_main))
         .route("/media/:id/resource", get(media_resource))
         .route("/media/:id/dash/*path", get(media_dash_resource))
@@ -1106,6 +1115,32 @@ async fn playback(
         qualities: stream.qualities,
         can_fallback_to_mpv: false,
     }))
+}
+
+async fn skip_times(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<SkipTimesInput>,
+) -> ApiResult<Json<Vec<SkipTime>>> {
+    require_user(&state, &headers).await?;
+    let times = fetch_skip_times(input.catalog_id, input.episode_number)
+        .await
+        .map_err(|error| {
+            tracing::warn!(
+                catalog_id = input.catalog_id,
+                episode_number = input.episode_number,
+                %error,
+                "AniSkip lookup failed"
+            );
+            ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "ANISKIP_UNAVAILABLE",
+                "skip-times",
+                "Automatic skip times are temporarily unavailable.",
+                true,
+            )
+        })?;
+    Ok(Json(times))
 }
 
 async fn media_main(

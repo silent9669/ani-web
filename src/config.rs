@@ -17,10 +17,10 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub allanime: bool,
 
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub animegg: bool,
 
     #[serde(default = "default_true")]
@@ -71,8 +71,13 @@ fn default_theme() -> ThemeConfig {
 impl Default for SourcesConfig {
     fn default() -> Self {
         Self {
-            allanime: true,
-            animegg: true,
+            // AllAnime remains available for manual verification, but its
+            // current episode sources do not resolve to a playable stream.
+            allanime: false,
+            // AnimeGG is opt-in while its public origin is timing out. Keeping
+            // it enabled would advertise a provider that cannot pass playback
+            // certification.
+            animegg: false,
             moviebox: true,
             kkphim: true,
             ophim: true,

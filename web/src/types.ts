@@ -148,6 +148,12 @@ export type Playback = {
   canFallbackToMpv: boolean;
 };
 
+export type SkipTime = {
+  skipType: "op" | "ed" | "recap" | string;
+  startTime: number;
+  endTime: number;
+};
+
 export type DownloadEvent = {
   event: "started" | "progress" | "finished" | string;
   progress: number;

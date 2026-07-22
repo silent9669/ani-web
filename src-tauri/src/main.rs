@@ -14,6 +14,7 @@ use ani_desk_core::player::Player;
 use ani_desk_core::providers::{
     Anime, Episode, Language, ProviderCapabilities, ProviderRegistry, StreamInfo, Subtitle,
 };
+use ani_desk_core::skip_times::{fetch_skip_times, SkipTime};
 use anyhow::Context;
 use chrono::Utc;
 use download::{DownloadEvent, DownloadRequest, DownloadResult};
@@ -788,6 +789,25 @@ async fn prepare_playback(
         qualities: stream.qualities,
         can_fallback_to_mpv: true,
     })
+}
+
+#[tauri::command]
+async fn get_skip_times(
+    catalog_id: i64,
+    episode_number: u32,
+) -> Result<Vec<SkipTime>, AppErrorDto> {
+    fetch_skip_times(catalog_id, episode_number)
+        .await
+        .map_err(|error| {
+            tracing::warn!(%catalog_id, %episode_number, %error, "AniSkip lookup failed");
+            app_error_message(
+                "ANISKIP_UNAVAILABLE",
+                "skip-times",
+                None,
+                "Automatic skip times are temporarily unavailable",
+                true,
+            )
+        })
 }
 
 #[tauri::command]
@@ -1586,6 +1606,7 @@ fn main() {
             get_anime_details,
             get_episodes,
             prepare_playback,
+            get_skip_times,
             download_episode,
             list_downloads,
             open_download,

@@ -366,6 +366,8 @@ def mocked_page(page, vite_server):
                     qualities: ["360p", "720p", "1080p"],
                     canFallbackToMpv: true
                 };
+            } else if (cmd === "get_skip_times") {
+                return [{ skipType: "op", startTime: 90, endTime: 150 }];
             } else if (cmd === "download_episode") {
                 if (state.download_error) {
                     throw new Error(state.download_error);

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#160f0d" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>ani-desk · Theatre maintenance</title>
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="cinema-shell">
+      <header class="announcement" aria-label="Theatre announcements">
+        <div class="announcement__track" tabindex="0">
+          <div class="announcement__set">
+            <span>ani-desk is temporarily offline</span><i></i>
+            <span>The theatre will return shortly</span><i></i>
+            <span>Your watch history is safe</span><i></i>
+            <span>Family screening room</span><i></i>
+            <span>Maintenance in progress</span><i></i>
+          </div>
+          <div class="announcement__set" aria-hidden="true">
+            <span>ani-desk is temporarily offline</span><i></i>
+            <span>The theatre will return shortly</span><i></i>
+            <span>Your watch history is safe</span><i></i>
+            <span>Family screening room</span><i></i>
+            <span>Maintenance in progress</span><i></i>
+          </div>
+        </div>
+      </header>
+
+      <main class="poster-wall" aria-labelledby="maintenance-title">
+        <div class="projector-glow" aria-hidden="true"></div>
+
+        <div class="poster poster--late" aria-hidden="true">
+          <span class="poster__eyebrow">Tonight only</span>
+          <strong>After Midnight</strong>
+          <small>Light finds a way through.</small>
+        </div>
+        <div class="poster poster--family" aria-hidden="true">
+          <span class="poster__eyebrow">Family feature</span>
+          <strong>Home Cinema</strong>
+          <small>Five seats. One story.</small>
+        </div>
+        <div class="poster poster--archive" aria-hidden="true">
+          <span class="poster__eyebrow">From the archive</span>
+          <strong>Rewind / Replay</strong>
+          <small>Keep every chapter close.</small>
+        </div>
+        <div class="poster poster--nocturne" aria-hidden="true">
+          <span class="poster__eyebrow">Late programme</span>
+          <strong>Nocturne</strong>
+          <small>Private screening · 22:40</small>
+        </div>
+
+        <article class="maintenance-frame" aria-describedby="maintenance-message privacy-note">
+          <div class="bulb-rail bulb-rail--top" aria-hidden="true"></div>
+          <div class="bulb-rail bulb-rail--bottom" aria-hidden="true"></div>
+          <div class="maintenance-poster">
+            <header class="brand-lockup">
+              <img src="assets/logo.png" alt="" width="44" height="44" />
+              <div>
+                <strong>ani-desk</strong>
+                <span>Private family theatre</span>
+              </div>
+              <span class="programme-mark">Programme&nbsp;07</span>
+            </header>
+
+            <div class="poster-copy">
+              <p class="kicker"><span></span> House notice · Maintenance</p>
+              <h1 id="maintenance-title">The theatre is taking a short break.</h1>
+              <p id="maintenance-message">
+                ani-desk is temporarily offline for maintenance. Your watch history, family
+                accounts, and library remain stored safely on the home server.
+              </p>
+            </div>
+
+            <div class="status-board">
+              <div class="status-board__item status-board__item--current">
+                <span>Current status</span>
+                <strong id="current-status"><i></i> Maintenance in progress</strong>
+              </div>
+              <div class="status-board__item">
+                <span>Expected return</span>
+                <strong id="expected-return">Shortly</strong>
+              </div>
+              <div class="status-board__item">
+                <span>Last update</span>
+                <strong id="last-update">22 Jul · 19:30 ICT</strong>
+              </div>
+            </div>
+
+            <footer class="poster-actions">
+              <button id="check-again" type="button" data-state="idle">
+                <span class="button-label">Check again</span>
+                <span class="button-mark" aria-hidden="true">↻</span>
+              </button>
+              <p id="privacy-note">
+                <span aria-hidden="true">◆</span>
+                Account data stays on your home server.
+              </p>
+            </footer>
+
+            <p id="status-live" class="visually-hidden" aria-live="polite"></p>
+          </div>
+        </article>
+
+        <p class="wall-caption" aria-hidden="true">Lobby wall · Private screening room</p>
+      </main>
+    </div>
+    <script src="app.js" defer></script>
+  </body>
+</html>

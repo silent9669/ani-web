@@ -58,6 +58,7 @@ import type {
   ProviderAvailability,
   Source,
   SessionUser,
+  SkipTime,
   WatchHistory,
 } from "./types";
 import {
@@ -71,6 +72,7 @@ const SOURCE_STORAGE_KEY = "ani-desk:selected-source";
 const THEME_STORAGE_KEY = "ani-desk:theme";
 const APP_SCALE_STORAGE_KEY = "ani-desk:scale";
 const APP_FONT_STORAGE_KEY = "ani-desk:font";
+const AUTO_SKIP_STORAGE_KEY = "ani-desk:auto-skip";
 const EPISODE_RANGE_SIZE = 50;
 const LOGO_SRC = "/logo.png";
 const fadeUpVariant = {
@@ -135,6 +137,7 @@ function App() {
   const [theme, setTheme] = useState<AppTheme>(loadSavedTheme);
   const [appScale, setAppScale] = useState<AppScale>(loadSavedScale);
   const [appFont, setAppFont] = useState<AppFont>(loadSavedFont);
+  const [autoSkip, setAutoSkip] = useState(loadSavedAutoSkip);
 
   useEffect(() => {
     void bootstrap();
@@ -154,6 +157,10 @@ function App() {
     document.documentElement.dataset.font = appFont;
     saveFont(appFont);
   }, [appFont]);
+
+  useEffect(() => {
+    saveAutoSkip(autoSkip);
+  }, [autoSkip]);
 
   useEffect(() => {
     if (bootstrapping || !isTauriRuntime()) return;
@@ -1019,10 +1026,12 @@ function App() {
               theme={theme}
               appScale={appScale}
               appFont={appFont}
+              autoSkip={autoSkip}
               onBack={goBack}
               onThemeChange={setTheme}
               onScaleChange={setAppScale}
               onFontChange={setAppFont}
+              onAutoSkipChange={setAutoSkip}
             />
           )}
 
@@ -1099,6 +1108,8 @@ function App() {
           <VideoPlayer
             key="video-player"
             context={player}
+            autoSkip={autoSkip}
+            onPlayEpisode={(episode) => playEpisode(player.anime, episode, 0, player.episodes)}
             onClose={() => {
               setPlayer(null);
               void refreshShelfData();
@@ -1159,18 +1170,22 @@ function SettingsPage({
   theme,
   appScale,
   appFont,
+  autoSkip,
   onBack,
   onThemeChange,
   onScaleChange,
   onFontChange,
+  onAutoSkipChange,
 }: {
   theme: AppTheme;
   appScale: AppScale;
   appFont: AppFont;
+  autoSkip: boolean;
   onBack: () => void;
   onThemeChange: (theme: AppTheme) => void;
   onScaleChange: (scale: AppScale) => void;
   onFontChange: (font: AppFont) => void;
+  onAutoSkipChange: (enabled: boolean) => void;
 }) {
   const themes: Array<{ id: AppTheme; name: string; description: string }> = [
     { id: "obsidian", name: "Obsidian Cinema", description: "Warm black, restrained red, full artwork." },
@@ -1196,7 +1211,7 @@ function SettingsPage({
         <div>
           <p>Appearance</p>
           <h1>Settings</h1>
-          <span>Choose the theme, interface size, and Vietnamese-compatible reading font for this device.</span>
+          <span>Choose playback behavior, interface size, theme, and reading font for this device.</span>
         </div>
       </header>
 
@@ -1241,6 +1256,22 @@ function SettingsPage({
                 {appFont === option.id ? <Check size={17} /> : null}
               </button>
             ))}
+          </div>
+        </section>
+
+        <section className="settings-edit-card settings-playback-card">
+          <div className="settings-section-heading">
+            <div><h2>Playback</h2><p>Use AniSkip community timing data to move past openings and endings.</p></div>
+          </div>
+          <div className="appearance-options" role="radiogroup" aria-label="Automatic AniSkip">
+            <button role="radio" aria-checked={autoSkip} className={autoSkip ? "active" : ""} onClick={() => onAutoSkipChange(true)}>
+              <span><strong>Auto-skip on</strong><small>Skip known opening and ending ranges automatically.</small></span>
+              {autoSkip ? <Check size={17} /> : null}
+            </button>
+            <button role="radio" aria-checked={!autoSkip} className={!autoSkip ? "active" : ""} onClick={() => onAutoSkipChange(false)}>
+              <span><strong>Auto-skip off</strong><small>Play every detected segment without interruption.</small></span>
+              {!autoSkip ? <Check size={17} /> : null}
+            </button>
           </div>
         </section>
       </div>
@@ -3287,7 +3318,17 @@ function DetailPage({
   );
 }
 
-function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: () => void }) {
+function VideoPlayer({
+  context,
+  autoSkip,
+  onPlayEpisode,
+  onClose,
+}: {
+  context: PlayerContext;
+  autoSkip: boolean;
+  onPlayEpisode: (episode: Episode) => Promise<void>;
+  onClose: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const dashRef = useRef<MediaPlayerClass | null>(null);
@@ -3295,6 +3336,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const savingAtRef = useRef(0);
   const controlsTimerRef = useRef<number | null>(null);
   const skipFeedbackTimerRef = useRef<number | null>(null);
+  const skippedRangesRef = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const [quality, setQuality] = useState("auto");
   const [levels, setLevels] = useState<QualityLevel[]>([]);
@@ -3304,11 +3346,37 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [skipFeedback, setSkipFeedback] = useState<{ amount: number; id: number } | null>(null);
+  const [skipFeedback, setSkipFeedback] = useState<{ amount?: number; label?: string; id: number } | null>(null);
+  const [skipTimes, setSkipTimes] = useState<SkipTime[]>([]);
+  const [switchingEpisode, setSwitchingEpisode] = useState(false);
   const streamIsHls = context.playback.streamKind === "hls" || context.playback.originalUrl.toLowerCase().includes(".m3u8");
   const streamIsDash = context.playback.streamKind === "dash" || context.playback.originalUrl.toLowerCase().includes(".mpd");
   const subtitleTracks = context.playback.subtitles.filter((item) => item.url);
   const [subtitle, setSubtitle] = useState(subtitleTracks.length ? "0" : "off");
+  const orderedEpisodes = useMemo(
+    () => [...context.episodes].sort((left, right) => left.number - right.number),
+    [context.episodes],
+  );
+  const episodeIndex = orderedEpisodes.findIndex((episode) => episode.id === context.episode.id);
+  const previousEpisode = episodeIndex > 0 ? orderedEpisodes[episodeIndex - 1] : null;
+  const nextEpisode = episodeIndex >= 0 && episodeIndex < orderedEpisodes.length - 1
+    ? orderedEpisodes[episodeIndex + 1]
+    : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    skippedRangesRef.current.clear();
+    setSkipTimes([]);
+    if (!autoSkip || !context.anime.catalogId) return () => { cancelled = true; };
+    void api.getSkipTimes(context.anime.catalogId, context.episode.number)
+      .then((times) => {
+        if (!cancelled) setSkipTimes(times);
+      })
+      .catch(() => {
+        if (!cancelled) setSkipTimes([]);
+      });
+    return () => { cancelled = true; };
+  }, [autoSkip, context.anime.catalogId, context.episode.id, context.episode.number]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -3439,6 +3507,17 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     if (!video) return;
 
     const syncState = () => {
+      if (autoSkip) {
+        const range = skipTimes.find((item) => video.currentTime >= item.startTime && video.currentTime < item.endTime);
+        if (range) {
+          const rangeKey = `${range.skipType}:${range.startTime}:${range.endTime}`;
+          if (!skippedRangesRef.current.has(rangeKey)) {
+            skippedRangesRef.current.add(rangeKey);
+            video.currentTime = range.endTime;
+            showSkipFeedback(`Skipped ${skipTypeLabel(range.skipType)}`);
+          }
+        }
+      }
       setCurrentTime(video.currentTime || 0);
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       setVolume(video.volume);
@@ -3458,7 +3537,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
       video.removeEventListener("pause", syncState);
       video.removeEventListener("volumechange", syncState);
     };
-  }, []);
+  }, [autoSkip, skipTimes]);
 
   useEffect(() => {
     const saveInterval = window.setInterval(() => {
@@ -3497,13 +3576,19 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
       } else if (event.key === "Escape") {
         event.preventDefault();
         void closePlayer();
+      } else if (event.key === "[") {
+        event.preventDefault();
+        if (previousEpisode) void changeEpisode(previousEpisode);
+      } else if (event.key === "]") {
+        event.preventDefault();
+        if (nextEpisode) void changeEpisode(nextEpisode);
       }
       revealControls();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [volume, muted, isPlaying]);
+  }, [volume, muted, isPlaying, previousEpisode?.id, nextEpisode?.id, switchingEpisode]);
 
   useEffect(() => {
     revealControls();
@@ -3575,10 +3660,14 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     const max = Number.isFinite(video.duration) ? video.duration : video.currentTime + seconds;
     video.currentTime = Math.max(0, Math.min(max, video.currentTime + seconds));
     setCurrentTime(video.currentTime);
-    setSkipFeedback({ amount: seconds, id: Date.now() });
+    showSkipFeedback(undefined, seconds);
+    void saveProgress(true);
+  }
+
+  function showSkipFeedback(label?: string, amount?: number) {
+    setSkipFeedback({ amount, label, id: Date.now() });
     if (skipFeedbackTimerRef.current) window.clearTimeout(skipFeedbackTimerRef.current);
     skipFeedbackTimerRef.current = window.setTimeout(() => setSkipFeedback(null), 850);
-    void saveProgress(true);
   }
 
   function setVideoVolume(nextVolume: number) {
@@ -3642,6 +3731,17 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
     onClose();
   }
 
+  async function changeEpisode(episode: Episode) {
+    if (switchingEpisode || episode.id === context.episode.id) return;
+    setSwitchingEpisode(true);
+    await saveProgress(true).catch(() => undefined);
+    try {
+      await onPlayEpisode(episode);
+    } finally {
+      setSwitchingEpisode(false);
+    }
+  }
+
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -3681,6 +3781,13 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
           </button>
           <button onClick={() => void togglePictureInPicture()} aria-label="Picture in Picture" title="Picture in Picture">
             <PictureInPicture2 size={20} />
+          </button>
+          <span className="player-episode-divider" aria-hidden="true" />
+          <button onClick={() => previousEpisode && void changeEpisode(previousEpisode)} disabled={!previousEpisode || switchingEpisode} aria-label="Previous episode" title="Previous episode ([)">
+            <ChevronLeft size={20} />
+          </button>
+          <button onClick={() => nextEpisode && void changeEpisode(nextEpisode)} disabled={!nextEpisode || switchingEpisode} aria-label="Next episode" title="Next episode (])">
+            <ChevronRight size={20} />
           </button>
         </div>
       </div>
@@ -3723,7 +3830,7 @@ function VideoPlayer({ context, onClose }: { context: PlayerContext; onClose: ()
               role="status"
               aria-live="polite"
             >
-              {skipFeedback.amount > 0 ? "+" : "−"}{Math.abs(skipFeedback.amount)} seconds
+              {skipFeedback.label ?? `${(skipFeedback.amount ?? 0) > 0 ? "+" : "−"}${Math.abs(skipFeedback.amount ?? 0)} seconds`}
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -3999,6 +4106,30 @@ function saveFont(font: AppFont) {
   } catch {
     // localStorage can be unavailable in restricted WebView contexts.
   }
+}
+
+function loadSavedAutoSkip() {
+  try {
+    const saved = localStorage.getItem(AUTO_SKIP_STORAGE_KEY);
+    return saved === null ? true : saved !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function saveAutoSkip(enabled: boolean) {
+  try {
+    localStorage.setItem(AUTO_SKIP_STORAGE_KEY, String(enabled));
+  } catch {
+    // localStorage can be unavailable in restricted WebView contexts.
+  }
+}
+
+function skipTypeLabel(skipType: string) {
+  if (skipType === "op") return "opening";
+  if (skipType === "ed") return "ending";
+  if (skipType === "recap") return "recap";
+  return "segment";
 }
 
 function applyHlsQuality(hls: Hls | null, quality: string) {

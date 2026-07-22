@@ -1,0 +1,19 @@
+[Unit]
+Description=Update ani-desk public IP at Cloudflare
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ani-desk-cloudflare-ddns.env
+ExecStart=/usr/local/sbin/cloudflare-ddns
+User=nobody
+Group=nogroup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
