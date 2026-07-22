@@ -22,6 +22,8 @@ import {
   PictureInPicture2,
   Play,
   Plus,
+  RotateCcw,
+  RotateCw,
   Search,
   Settings2,
   ShieldCheck,
@@ -3782,13 +3784,6 @@ function VideoPlayer({
           <button onClick={() => void togglePictureInPicture()} aria-label="Picture in Picture" title="Picture in Picture">
             <PictureInPicture2 size={20} />
           </button>
-          <span className="player-episode-divider" aria-hidden="true" />
-          <button onClick={() => previousEpisode && void changeEpisode(previousEpisode)} disabled={!previousEpisode || switchingEpisode} aria-label="Previous episode" title="Previous episode ([)">
-            <ChevronLeft size={20} />
-          </button>
-          <button onClick={() => nextEpisode && void changeEpisode(nextEpisode)} disabled={!nextEpisode || switchingEpisode} aria-label="Next episode" title="Next episode (])">
-            <ChevronRight size={20} />
-          </button>
         </div>
       </div>
 
@@ -3808,14 +3803,38 @@ function VideoPlayer({
         />
       </div>
 
-      <div className="player-center">
-        <button onClick={() => seekBy(-10)} aria-label="Back 10 seconds">
+      <div className="player-center" role="group" aria-label="Playback controls">
+        <button
+          className="episode-transport"
+          onClick={() => previousEpisode && void changeEpisode(previousEpisode)}
+          disabled={!previousEpisode || switchingEpisode}
+          aria-label="Previous episode"
+          aria-busy={switchingEpisode}
+          data-state={switchingEpisode ? "loading" : undefined}
+          title="Previous episode ([)"
+        >
           <SkipBack size={30} />
+        </button>
+        <button className="seek-transport" onClick={() => seekBy(-10)} aria-label="Back 10 seconds" title="Back 10 seconds">
+          <RotateCcw size={34} />
+          <span className="seek-seconds" aria-hidden="true">10</span>
         </button>
         <button className="play-ring" onClick={togglePlay} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? <Pause size={34} /> : <Play size={34} />}
         </button>
-        <button onClick={() => seekBy(10)} aria-label="Forward 10 seconds">
+        <button className="seek-transport" onClick={() => seekBy(10)} aria-label="Forward 10 seconds" title="Forward 10 seconds">
+          <RotateCw size={34} />
+          <span className="seek-seconds" aria-hidden="true">10</span>
+        </button>
+        <button
+          className="episode-transport"
+          onClick={() => nextEpisode && void changeEpisode(nextEpisode)}
+          disabled={!nextEpisode || switchingEpisode}
+          aria-label="Next episode"
+          aria-busy={switchingEpisode}
+          data-state={switchingEpisode ? "loading" : undefined}
+          title="Next episode (])"
+        >
           <SkipForward size={30} />
         </button>
         <AnimatePresence mode="wait">

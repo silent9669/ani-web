@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Player transport controls — states</title>
+    <link rel="stylesheet" href="../tokens.css" />
+    <style>
+      /* Hallmark · component preview: player transport controls · theme: Obsidian Cinema */
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; overflow-x: clip; }
+      body {
+        margin: 0;
+        padding: var(--space-md);
+        color: var(--color-ink);
+        background: var(--color-paper);
+        font-family: var(--font-body);
+      }
+      main { width: min(100%, 64rem); margin-inline: auto; }
+      h1 { margin: 0 0 var(--space-md); font-family: var(--font-display); font-style: normal; }
+      .states { display: grid; gap: var(--space-xs); }
+      .state-row {
+        display: grid;
+        grid-template-columns: 7rem minmax(0, 1fr);
+        align-items: center;
+        gap: var(--space-sm);
+        padding: var(--space-xs);
+        border-block-start: var(--rule-hair) solid var(--color-rule-2);
+      }
+      .state-row > span { color: var(--color-ink-2); font-family: var(--font-outlier); font-size: var(--text-xs); }
+      .transport { display: flex; align-items: center; justify-content: center; gap: var(--space-2xs); }
+      button {
+        position: relative;
+        display: grid;
+        width: calc(var(--space-lg) * 2);
+        height: calc(var(--space-lg) * 2);
+        place-items: center;
+        border: var(--rule-hair) solid var(--color-glass-hairline);
+        border-radius: var(--radius-pill);
+        color: var(--color-ink);
+        background: var(--color-glass-strong);
+      }
+      button:first-child, button:last-child { width: var(--space-xl); height: var(--space-xl); color: var(--color-ink-2); }
+      button:nth-child(3) { width: var(--space-2xl); height: var(--space-2xl); }
+      button svg { width: var(--space-md); height: var(--space-md); fill: none; stroke: currentColor; stroke-width: var(--rule-fine); }
+      .seek b { position: absolute; font-family: var(--font-outlier); font-size: var(--text-xs); }
+      .is-hover { background: var(--color-paper-3); transform: translateY(calc(var(--rule-hair) * -1)); }
+      .is-focus { outline: var(--rule-fine) solid var(--color-focus); outline-offset: var(--space-3xs); }
+      .is-active { transform: scale(0.94); }
+      .is-disabled { cursor: not-allowed; opacity: 0.42; }
+      .is-loading { cursor: wait; opacity: 0.68; }
+      .is-error { border-color: var(--color-danger); color: var(--color-danger); }
+      .is-success { border-color: var(--color-success); color: var(--color-success); }
+      @media (max-width: 40rem) {
+        .state-row { grid-template-columns: 1fr; }
+        .transport { gap: var(--space-3xs); }
+        button { width: var(--space-xl); height: var(--space-xl); }
+        button:first-child, button:last-child { width: var(--space-xl); height: var(--space-xl); }
+        button:nth-child(3) { width: calc(var(--space-lg) + var(--space-md)); height: calc(var(--space-lg) + var(--space-md)); }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Player transport controls — 8 states</h1>
+      <div class="states" id="states"></div>
+    </main>
+    <script>
+      const states = ["default", "hover", "focus", "active", "disabled", "loading", "error", "success"];
+      const previous = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16ZM5 19V5"/></svg>';
+      const back = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/></svg><b>10</b>';
+      const play = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>';
+      const forward = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/></svg><b>10</b>';
+      const next = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 4 10 8-10 8V4Zm14 1v14"/></svg>';
+      document.querySelector("#states").innerHTML = states.map((state) => `
+        <div class="state-row">
+          <span>${state}</span>
+          <div class="transport">
+            <button aria-label="Previous episode" class="${state === "default" ? "" : `is-${state}`}">${previous}</button>
+            <button aria-label="Back 10 seconds" class="seek ${state === "default" ? "" : `is-${state}`}">${back}</button>
+            <button aria-label="Play" class="${state === "default" ? "" : `is-${state}`}">${play}</button>
+            <button aria-label="Forward 10 seconds" class="seek ${state === "default" ? "" : `is-${state}`}">${forward}</button>
+            <button aria-label="Next episode" class="${state === "default" ? "" : `is-${state}`}">${next}</button>
+          </div>
+        </div>
+      `).join("");
+    </script>
+  </body>
+</html>

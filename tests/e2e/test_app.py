@@ -978,6 +978,21 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     expect(mocked_page.locator(".player-now-playing small")).not_to_contain_text("Episode 1 · Episode 1")
     expect(mocked_page.locator(".player-timeline")).to_be_visible()
     expect(mocked_page.locator(".player-utility-pill")).to_be_visible()
+    expect(mocked_page.locator(".player-leading-controls").get_by_role("button", name="Previous episode")).to_have_count(0)
+    center_controls = mocked_page.get_by_label("Playback controls")
+    expect(center_controls).to_be_visible()
+    transport_labels = center_controls.locator("button").evaluate_all(
+        "buttons => buttons.map(button => button.getAttribute('aria-label'))"
+    )
+    assert transport_labels[:2] == [
+        "Previous episode",
+        "Back 10 seconds",
+    ]
+    assert transport_labels[2] in ("Play", "Pause")
+    assert transport_labels[3:] == [
+        "Forward 10 seconds",
+        "Next episode",
+    ]
     previous_episode = mocked_page.get_by_role("button", name="Previous episode")
     next_episode = mocked_page.get_by_role("button", name="Next episode")
     expect(previous_episode).to_be_disabled()
@@ -986,6 +1001,24 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     expect(mocked_page.locator(".player-now-playing small")).to_have_text("Episode 2")
     expect(mocked_page.get_by_role("button", name="Previous episode")).to_be_enabled()
 
+    for width in (320, 375, 414, 768):
+        mocked_page.set_viewport_size({"width": width, "height": 720})
+        transport_bounds = center_controls.evaluate("""node => {
+            const rect = node.getBoundingClientRect();
+            return {
+                left: rect.left,
+                right: rect.right,
+                buttons: [...node.querySelectorAll('button')].map((button) => {
+                    const buttonRect = button.getBoundingClientRect();
+                    return { width: buttonRect.width, height: buttonRect.height };
+                }),
+            };
+        }""")
+        assert transport_bounds["left"] >= 0
+        assert transport_bounds["right"] <= width
+        assert all(button["width"] >= 44 and button["height"] >= 44 for button in transport_bounds["buttons"])
+
+    mocked_page.set_viewport_size({"width": 1440, "height": 900})
     safe_zone = mocked_page.locator(".player-now-playing").evaluate("""node => {
         const rect = node.getBoundingClientRect();
         return {
