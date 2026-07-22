@@ -3428,6 +3428,18 @@ button:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.player-leading-controls button:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+
+.player-episode-divider {
+  width: 1px;
+  height: 1.35rem;
+  margin-inline: 0.15rem;
+  background: var(--apple-line);
+}
+
 .player-volume-dock {
   position: absolute;
   top: 1.4rem;
@@ -7932,6 +7944,24 @@ select:focus-visible {
   color: var(--color-muted);
   font-weight: 400;
   white-space: normal;
+}
+
+.settings-playback-card {
+  grid-column: 1 / -1;
+}
+
+.settings-playback-card .settings-section-heading {
+  min-height: 0;
+}
+
+.settings-playback-card .appearance-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 48rem) {
+  .settings-playback-card .appearance-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .catalog-browser-header { grid-template-columns: auto minmax(0, 1fr) !important; }

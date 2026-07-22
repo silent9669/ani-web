@@ -15,6 +15,7 @@ import type {
   Playback,
   ProviderAvailability,
   SessionUser,
+  SkipTime,
   Source,
   WatchHistory,
 } from "./types";
@@ -142,6 +143,9 @@ export const api = {
   preparePlayback: (provider: string, episodeId: string) => isNativeRuntime()
     ? invoke<Playback>("prepare_playback", { provider, episodeId })
     : webPost<Playback>("/playback", { provider, episodeId }),
+  getSkipTimes: (catalogId: number, episodeNumber: number) => isNativeRuntime()
+    ? invoke<SkipTime[]>("get_skip_times", { catalogId, episodeNumber })
+    : webPost<SkipTime[]>("/skip-times", { catalogId, episodeNumber }),
   downloadEpisode: async (
     request: {
       id: string;

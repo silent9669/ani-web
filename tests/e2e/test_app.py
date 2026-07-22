@@ -978,6 +978,13 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     expect(mocked_page.locator(".player-now-playing small")).not_to_contain_text("Episode 1 · Episode 1")
     expect(mocked_page.locator(".player-timeline")).to_be_visible()
     expect(mocked_page.locator(".player-utility-pill")).to_be_visible()
+    previous_episode = mocked_page.get_by_role("button", name="Previous episode")
+    next_episode = mocked_page.get_by_role("button", name="Next episode")
+    expect(previous_episode).to_be_disabled()
+    expect(next_episode).to_be_enabled()
+    next_episode.click()
+    expect(mocked_page.locator(".player-now-playing small")).to_have_text("Episode 2")
+    expect(mocked_page.get_by_role("button", name="Previous episode")).to_be_enabled()
 
     safe_zone = mocked_page.locator(".player-now-playing").evaluate("""node => {
         const rect = node.getBoundingClientRect();
@@ -991,6 +998,19 @@ def test_t3_player_matches_apple_style_control_composition(mocked_page):
     assert safe_zone["left"] < 80
     assert safe_zone["right"] < safe_zone["midpoint"]
     assert safe_zone["titleSize"] <= 24
+
+def test_t3_aniskip_is_on_by_default_and_persists(mocked_page):
+    settings_nav = mocked_page.get_by_label("Primary navigation").get_by_role("button", name="Settings")
+    settings_nav.click()
+    auto_on = mocked_page.get_by_role("radio", name="Auto-skip on", exact=False)
+    auto_off = mocked_page.get_by_role("radio", name="Auto-skip off", exact=False)
+    expect(auto_on).to_have_attribute("aria-checked", "true")
+
+    auto_off.click()
+    expect(auto_off).to_have_attribute("aria-checked", "true")
+    mocked_page.reload()
+    mocked_page.get_by_label("Primary navigation").get_by_role("button", name="Settings").click()
+    expect(mocked_page.get_by_role("radio", name="Auto-skip off", exact=False)).to_have_attribute("aria-checked", "true")
 
 def test_t3_my_list_nav_and_remove(mocked_page):
     mocked_page.locator(".hero-search-trigger").click()

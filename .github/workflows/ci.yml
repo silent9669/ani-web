@@ -68,6 +68,7 @@ jobs:
             --env-file deploy/homelab/.env.example \
             --file deploy/homelab/compose.yml \
             config --quiet
+          npm run cloudflare:test
 
       - name: Check formatting
         run: cargo fmt --all -- --check

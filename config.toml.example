@@ -5,11 +5,12 @@
 #   Linux: ~/.config/ani-desk/config.toml
 
 [sources]
-# Enable AllAnime source (English)
-allanime = true
+# Optional AllAnime source. Search and episode metadata are available, but its
+# current stream sources fail playback certification.
+allanime = false
 
 # Live-certified English source.
-animegg = true
+animegg = false
 
 # Signed English-sub series and film streams.
 moviebox = true
