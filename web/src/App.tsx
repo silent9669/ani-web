@@ -3412,7 +3412,9 @@ function VideoPlayer({
     };
 
     const handleNativeError = () => {
-      if (!disposed) setError("The browser player could not decode this stream. Try mpv fallback.");
+      if (!disposed && !hlsRef.current && !dashRef.current) {
+        setError("The browser player could not decode this stream. Try mpv fallback.");
+      }
     };
 
     video.addEventListener("error", handleNativeError);
@@ -3445,15 +3447,23 @@ function VideoPlayer({
         if (!disposed) setError(`The DASH player could not start (${String(loadError)}).`);
       });
     } else if (streamIsHls) {
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const startNativeHls = () => {
+        if (!video.canPlayType("application/vnd.apple.mpegurl")) {
+          setError("This system WebView cannot play HLS streams. Use mpv fallback.");
+          return;
+        }
         video.src = context.playback.playbackUrl;
         video.addEventListener("loadedmetadata", startPlayback, { once: true });
         video.load();
+      };
+
+      if (prefersNativeHls()) {
+        startNativeHls();
       } else {
         void import("hls.js").then(({ default: HlsRuntime }) => {
           if (disposed) return;
           if (!HlsRuntime.isSupported()) {
-            setError("This system WebView cannot play HLS streams. Use mpv fallback.");
+            startNativeHls();
             return;
           }
 
@@ -3913,6 +3923,13 @@ function VideoPlayer({
       </div>
     </motion.div>
   );
+}
+
+function prefersNativeHls() {
+  const userAgent = navigator.userAgent;
+  const isSafari = /Safari\//.test(userAgent);
+  const isChromium = /(Chrome|Chromium|CriOS|Edg|OPR)\//.test(userAgent);
+  return isSafari && !isChromium;
 }
 
 function EmptyPanel({ title, compact = false }: { title: string; compact?: boolean }) {
